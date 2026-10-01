@@ -672,4 +672,28 @@ For a clean CrealityOS 2.3.5.33 + CFS machine:
 18. Continue with the Eddy staging/calibration/activation guide
 ```
 
+## K. Read-only optional add-on audit
+
+Every `doctor` run now checks the validated optional add-ons without modifying them:
+
+```sh
+sh install.sh doctor
+```
+
+The audit uses three result levels:
+
+- `PASS` — the detected component matches the relevant validated characteristic.
+- `INFO` — the component is absent, stopped, or a historical source marker is not visible; this is not automatically an error.
+- `WARN` — the detected state differs from a known-good characteristic and should be reviewed.
+
+For **Camera Settings Control**, the audit checks that the validated `Helper-Script/camera-settings.cfg` include is active.
+
+For **OctoEverywhere**, it checks the stock-Python profile, the historical `DisableMoonrakerConfigFileWrites` marker when visible, whether the generated K1 wrapper uses `exec`, the number of `moonraker_octoeverywhere` processes, and whether the PID file points to a running OctoEverywhere process.
+
+For **Mobileraker Companion**, it checks the stock-Python bootstrap marker when visible, whether the generated K1 wrapper uses `exec`, the number of `mobileraker.py` processes, and PID-file consistency.
+
+The audit is deliberately **read-only**. A warning prints what needs review but never kills a process, edits a wrapper, removes a PID file, or installs/removes Python.
+
+---
+
 If you do not want Git or any optional Helper Script add-ons, a release ZIP/USB copy of this project can be used instead; **Moonraker/Nginx and Fluidd remain the only required Helper Script installs for the supported profile.**
