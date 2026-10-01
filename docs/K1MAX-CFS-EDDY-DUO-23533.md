@@ -116,7 +116,7 @@ Stage does all of the following without sending motion G-code:
 - creates `btteddy_mcu.cfg`;
 - creates a fail-closed CFS wipe macro;
 - adds the Eddy includes;
-- prevents the stock unhomed-Z `FORCE_MOVE` path from being used merely because Eddy is configured.
+- preserves Creality's bounded unhomed-Z safety move while Eddy is only staged; the probe is not trusted for off-bed clearance before XY is known.
 
 Review the changed files, then issue **`FIRMWARE_RESTART` from Fluidd**.
 
@@ -189,8 +189,10 @@ Activation:
 - changes `[stepper_z]` to `endstop_pin: probe:z_virtual_endstop`;
 - removes the TMC `position_endstop`;
 - keeps the Creality PRTouch object available for CFS compatibility;
-- adds `EDDY_PREHOME_CLEAR MARGIN=1.000 MAX_TRAVEL=5.000` before any first X/Y homing movement when Z position is unknown;
-- adds `EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000` immediately before native Z homing;
+- when XY/Z are unknown, clears the mesh and runs `EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2` as a **connectivity-only** check; `CLEAR_SIDE` is not interpreted as nozzle clearance while the probe may be off-bed;
+- preserves Creality's bounded unhomed-Z-away move before XY homing: `+z_safe_g28` when `z_pos <= 20` or `power_loss == 1`, otherwise `+0.1 mm`;
+- disables Creality's persisted-`z_pos` blind `-8 mm` move toward the nozzle for Eddy systems, while preserving it for non-Eddy probes;
+- centers XY, waits for motion with `M400` plus settle time, then runs `EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000` immediately before native Z homing;
 - keeps the original deliberate two-pass Y and two-pass X sensorless homing sequence;
 - changes `ACCURATE_G28` so Eddy systems do not perform Creality's redundant second Z home.
 
@@ -207,7 +209,7 @@ Keep a hand on printer power.
 5. Only after those pass, validate a full `G28`.
 6. Repeat once after a full Klippy restart so the unknown-Z cold-start path is exercised.
 
-The validated machine deliberately uses direct +Z stepper recovery before XY when Z is unknown. That direction was physically verified for the K1 Max configuration. Do not use this fork as a generic motion-platform installer.
+The corrected production validation showed why Eddy must **not** be used as a pre-XY clearance sensor: with XY unknown, the probe can be physically off the bed and report `CLEAR_SIDE` / outside-calibration-range even though that says nothing about nozzle-to-bed clearance. The supported path therefore uses Creality's bounded unknown-Z move before XY, then uses live Eddy clearance only after XY has been centered over the bed. Do not use this fork as a generic motion-platform installer.
 
 ## 11. Measure and enable the fixed napkin wipe
 
@@ -243,8 +245,10 @@ Expected state:
 - Eddy drive current present;
 - Eddy mapping populated;
 - native Eddy Z active;
-- cold-start XY clearance guard present;
-- pre-Z-home guard present;
+- pre-XY Eddy connectivity-only check present;
+- bounded Creality unknown-Z move present;
+- unsafe off-bed `MARGIN=1.000 MAX_TRAVEL=5.000` Eddy-clearance block absent;
+- pre-Z-home Eddy clearance guard present;
 - fixed napkin wipe configured.
 
 Then validate the full CFS print path. The known-good machine completed:
