@@ -281,6 +281,282 @@ Install:
 
 It is not required for printing, CFS, or Eddy.
 
+### 17 — Camera Settings Control — OPTIONAL / VALIDATED
+
+Camera Settings Control was installed and active on the validated reference machine. The final configuration contained:
+
+```text
+[include Helper-Script/camera-settings.cfg]
+```
+
+and Klipper registered the expected camera commands, including `CAM_SETTINGS`, `CAM_BRIGHTNESS`, `CAM_CONTRAST`, `CAM_SATURATION`, `CAM_EXPOSURE_AUTO`, and the other `CAM_*` controls.
+
+Dependency:
+
+```text
+5) Klipper Gcode Shell Command
+```
+
+Then install:
+
+```text
+17) Camera Settings Control
+```
+
+**Historical result:** the Helper Script installation itself worked on the validated camera. No separate corrective command was found in the saved installation history.
+
+The current Helper Script also refuses this feature on the newer `CCX2F3299` camera hardware unless the compatible USB-camera service is present. Treat that Helper Script hardware check as authoritative for a different camera revision.
+
+### 19 — OctoEverywhere — OPTIONAL / VALIDATED WITH K1-SPECIFIC FIXES
+
+OctoEverywhere was validated on the reference machine, but the CFS/Entware environment exposed two K1-specific problems:
+
+1. the upstream K1 bootstrap preferred Entware Python when `/opt/bin/opkg` existed;
+2. the K1 `start-stop-daemon` wrapper could leave an orphan process and start a second `moonraker_octoeverywhere` instance.
+
+The validated installation used **stock Creality Python 3.8** and deliberately kept `/opt/bin/python3` absent.
+
+Dependencies from the Helper Script: Moonraker + Nginx, Fluidd or Mainsail, and Entware.
+
+Install menu option:
+
+```text
+19) OctoEverywhere
+```
+
+The validated OctoEverywhere repository was `/usr/data/octoeverywhere` at commit `1fbc632e3a5e441c613feabc9d7ed48a67ae082a`.
+
+First verify the intended Python runtime:
+
+```sh
+which python3
+python3 --version
+[ -e /opt/bin/python3 ] && echo "WARNING: /opt/bin/python3 EXISTS" || echo "GOOD: /opt/bin/python3 is absent"
+python3 -c "import virtualenv, PIL; print('stock Python dependencies OK')"
+```
+
+On the validated source revision, the K1 dependency block in `install.sh` was changed so it did not install Entware Python/PIP/Pillow:
+
+```sh
+cd /usr/data/octoeverywhere
+cp -p install.sh install.sh.pre-k1-cfs-eddy
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("install.sh")
+s = p.read_text()
+
+start = s.index('    if [[ $IS_K1_OS -eq 1 ]]\n    then', s.index("install_or_update_system_dependencies()"))
+end = s.index('    elif [[ $IS_K2_OS -eq 1 ]]', start)
+
+replacement = '''    if [[ $IS_K1_OS -eq 1 ]]
+    then
+        log_info "K1: using stock Creality Python 3.8; skipping Entware Python/PIP/Pillow install."
+
+        if ! python3 -c "import virtualenv, PIL" >/dev/null 2>&1; then
+            log_error "Stock K1 Python is missing virtualenv or Pillow."
+            exit 1
+        fi
+'''
+
+p.write_text(s[:start] + replacement + s[end:])
+print("OctoEverywhere K1 dependency bootstrap patched.")
+PY
+```
+
+The validated launch JSON also set `"DisableMoonrakerConfigFileWrites": true`. On that historical `install.sh`, this guarded edit adds the flag:
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("install.sh")
+s = p.read_text()
+
+needle = '\\"CMD_LINE_ARGS\\":\\"${CMD_LINE_ARGS}\\"}'
+replacement = '\\"CMD_LINE_ARGS\\":\\"${CMD_LINE_ARGS}\\",\\"DisableMoonrakerConfigFileWrites\\":true}'
+
+if needle not in s:
+    raise SystemExit("ERROR: OctoEverywhere launch JSON anchor not found")
+
+p.write_text(s.replace(needle, replacement, 1))
+print("DisableMoonrakerConfigFileWrites enabled.")
+PY
+```
+
+The K1 service template in `py_installer/Service.py` was changed to `exec` the Python module so the service PID tracks the actual process:
+
+```sh
+cp -p py_installer/Service.py py_installer/Service.py.pre-k1-cfs-eddy
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("py_installer/Service.py")
+s = p.read_text()
+
+old = '''PYTHONPATH={context.RepoRootFolder} {context.VirtualEnvPath}/bin/python3 -m {moduleNameToRun} "{argsJsonBase64}"
+exit $?
+'''
+new = '''export PYTHONPATH={context.RepoRootFolder}
+exec {context.VirtualEnvPath}/bin/python3 -m {moduleNameToRun} "{argsJsonBase64}"
+'''
+
+if old not in s:
+    raise SystemExit("ERROR: expected OctoEverywhere K1 service template not found")
+
+p.write_text(s.replace(old, new, 1))
+print("OctoEverywhere K1 service wrapper patched to exec Python.")
+PY
+
+python3 -m py_compile py_installer/Service.py
+```
+
+The generated validated paths were:
+
+```text
+/usr/data/printer_data/octoeverywhere-store/run-octoeverywhere-service.sh
+/etc/init.d/S66octoeverywhere_service
+/var/run/octoeverywhere.pid
+/usr/data/printer_data/config/octoeverywhere-system.cfg
+```
+
+If a repeated/failed install leaves duplicate OctoEverywhere processes:
+
+```sh
+/etc/init.d/S66octoeverywhere_service stop || true
+ps | grep '[m]oonraker_octoeverywhere'
+ps | grep '[m]oonraker_octoeverywhere' | awk '{print $1}' | xargs -r kill -9
+rm -f /var/run/octoeverywhere.pid
+/etc/init.d/S66octoeverywhere_service start
+sleep 3
+```
+
+Restart Moonraker after the OctoEverywhere Moonraker include changes:
+
+```sh
+/etc/init.d/S56moonraker_service stop
+sleep 2
+/etc/init.d/S56moonraker_service start
+```
+
+Require exactly one OctoEverywhere process:
+
+```sh
+OE_COUNT="$(ps | grep '[m]oonraker_octoeverywhere' | wc -l)"
+echo "OctoEverywhere Python process count: $OE_COUNT"
+if [ "$OE_COUNT" -ne 1 ]; then
+    echo "STOP: Expected exactly one OctoEverywhere instance."
+    exit 1
+fi
+wget -qO- http://127.0.0.1:7125/server/info
+```
+
+The saved reboot validation showed one OctoEverywhere process matching the PID file, Python 3.8.2, and no Entware Python.
+
+> These edits document the **validated historical OctoEverywhere revision**. Inspect newer upstream K1 installers before applying the patch blindly; equivalent fixes may already be upstream.
+
+### 22 — Mobileraker Companion — OPTIONAL / VALIDATED WITH K1-SPECIFIC FIXES
+
+Mobileraker Companion was validated with the same core rule: **use stock Creality Python 3.8 and do not let the installer pull in Entware Python/PIP/Pillow**.
+
+Dependencies from the Helper Script: Moonraker + Nginx, Fluidd or Mainsail, and Entware.
+
+Install menu option:
+
+```text
+22) Mobileraker Companion
+```
+
+The validated repository lived at `/usr/data/mobileraker_companion`. Before installation, the saved history patched `scripts/install.sh`:
+
+```sh
+cd /usr/data/mobileraker_companion
+mkdir -p /usr/data/pre-helper-components
+cp -p scripts/install.sh /usr/data/pre-helper-components/mobileraker-install.sh.official
+cp -p installer/Service.py /usr/data/pre-helper-components/mobileraker-Service.py.official
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("scripts/install.sh")
+s = p.read_text()
+
+func = s.index("install_or_update_system_dependencies()")
+start = s.index('    if [ "$IS_K1_OS" -eq 1 ]; then', func)
+end = s.index('    elif [ "$IS_SONIC_PAD_OS" -eq 1 ]; then', start)
+
+replacement = '''    if [ "$IS_K1_OS" -eq 1 ]; then
+        log_info "K1: using stock Creality Python 3.8; skipping Entware Python/PIP/Pillow install."
+
+        if ! python3 -c "import virtualenv, PIL" >/dev/null 2>&1; then
+            log_error "Stock K1 Python is missing virtualenv or Pillow."
+            exit 1
+        fi
+
+'''
+
+p.write_text(s[:start] + replacement + s[end:])
+print("K1 dependency bootstrap patched.")
+PY
+```
+
+The K1 service wrapper in `installer/Service.py` was changed to `exec` Python:
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("installer/Service.py")
+s = p.read_text()
+
+old = '''PYTHONPATH={context.repo_root} {context.virtual_env}/bin/python3 {context.repo_root}/mobileraker.py -l {context.printer_data_logs_folder} -c {context.mobileraker_conf_path}
+exit $?
+'''
+new = '''export PYTHONPATH={context.repo_root}
+exec {context.virtual_env}/bin/python3 {context.repo_root}/mobileraker.py -l {context.printer_data_logs_folder} -c {context.mobileraker_conf_path}
+'''
+
+if old not in s:
+    raise SystemExit("ERROR: Expected K1 service launch template not found")
+
+p.write_text(s.replace(old, new, 1))
+print("K1 service wrapper patched to exec Python.")
+PY
+```
+
+Validate the source edits before running/re-running the installer:
+
+```sh
+sh -n scripts/install.sh && echo "install.sh syntax OK"
+python3 -m py_compile installer/Service.py && echo "Service.py syntax OK"
+GIT_PAGER=cat git diff -- scripts/install.sh installer/Service.py
+```
+
+The generated validated wrapper ran:
+
+```sh
+export PYTHONPATH=/usr/data/mobileraker_companion
+exec /usr/data/mobileraker-env/bin/python3 \
+  /usr/data/mobileraker_companion/mobileraker.py \
+  -l /usr/data/printer_data/logs \
+  -c /usr/data/printer_data/config/mobileraker.conf
+```
+
+Validate after installation:
+
+```sh
+/usr/data/mobileraker-env/bin/python --version
+ps | grep '[m]obileraker.py' || echo "Mobileraker process not found"
+cat /var/run/mobileraker.pid 2>/dev/null || true
+wget -qO- http://127.0.0.1:7125/server/info
+```
+
+The saved reference state had one Mobileraker process, a matching PID file, Python 3.8.2 in `/usr/data/mobileraker-env`, Moonraker ready with no failed components, and `/opt/bin/python3` absent.
+
+> These commands document the **validated historical Mobileraker source state**. Check a newer upstream installer before applying them blindly.
+
 ---
 
 ## G. Full K1 Install Menu compatibility table
@@ -305,12 +581,12 @@ The table below follows the current 24-item K1 Install Menu from Guilouz's Helpe
 | 14 | M600 Support | **DO NOT INSTALL for v1.0** | Implements its own unload/load/pause filament workflow and was not validated with Creality CFS material handling. |
 | 15 | Git Backup | Optional / unvalidated | Does not own homing, but watches/pushes the config directory and requires Entware + Gcode Shell Command. This project's own rollback snapshots remain the authoritative recovery path. |
 | 16 | Moonraker Timelapse | **OPTIONAL / VALIDATED** | Present on the validated reference machine; requires Entware. |
-| 17 | Camera Settings Control | Optional / unvalidated | Does not intentionally alter Eddy motion; hardware-dependent and requires Gcode Shell Command. |
+| 17 | Camera Settings Control | **OPTIONAL / VALIDATED** | Present and active on the reference machine; requires Gcode Shell Command. No corrective patch was needed on the validated camera revision. |
 | 18 | USB Camera Support | Optional / unvalidated | No known Eddy conflict; requires Entware. |
-| 19 | OctoEverywhere | Optional / unvalidated | Remote-access service only; requires Moonraker, a web UI and Entware. |
+| 19 | OctoEverywhere | **OPTIONAL / VALIDATED WITH K1 FIXES** | Validated with stock Creality Python 3.8, `DisableMoonrakerConfigFileWrites`, an `exec` K1 wrapper, and single-process/PID cleanup. |
 | 20 | Moonraker Obico | Optional / unvalidated | Remote-access service only; requires Moonraker, a web UI and Entware. |
 | 21 | GuppyFLO | Optional / unvalidated | Remote-access layer; not part of the reference validation. |
-| 22 | Mobileraker Companion | Optional / unvalidated | Requires Moonraker, a web UI and Entware. |
+| 22 | Mobileraker Companion | **OPTIONAL / VALIDATED WITH K1 FIXES** | Validated with stock Python 3.8 dependency bootstrap and an `exec` service wrapper; requires Moonraker, web UI and Entware. |
 | 23 | OctoApp Companion | Optional / unvalidated | Requires Moonraker, a web UI and Entware. |
 | 24 | SimplyPrint | Optional / unvalidated | Moonraker integration; not part of the reference validation. |
 
@@ -318,6 +594,7 @@ The table below follows the current 24-item K1 Install Menu from Guilouz's Helpe
 
 - **REQUIRED** — install this for the supported procedure.
 - **OPTIONAL / VALIDATED** — the feature was present on the known-good reference machine but is not needed for Eddy/CFS.
+- **OPTIONAL / VALIDATED WITH K1 FIXES** — validated on the reference machine, but only after the documented K1-specific installation/service correction.
 - **Optional / unvalidated** — no direct conflict is known, but it was not part of the final regression. Install only after the base Eddy/CFS system passes validation, and add one feature at a time.
 - **DO NOT INSTALL** — conflicts with, overlaps, or replaces a part of the probe/CFS/motion/config stack that this project depends on.
 
@@ -387,9 +664,12 @@ For a clean CrealityOS 2.3.5.33 + CFS machine:
 10. OPTIONAL: Gcode Shell Command
 11. OPTIONAL: Improved Shapers
 12. OPTIONAL: Moonraker Timelapse
-13. Clone this K1-Klipper-Eddy fork
-14. Run: sh install.sh doctor
-15. Continue with the Eddy staging/calibration/activation guide
+13. OPTIONAL: Camera Settings Control
+14. OPTIONAL: OctoEverywhere (check/apply documented K1 fixes)
+15. OPTIONAL: Mobileraker Companion (check/apply documented K1 fixes)
+16. Clone this K1-Klipper-Eddy fork
+17. Run: sh install.sh doctor
+18. Continue with the Eddy staging/calibration/activation guide
 ```
 
 If you do not want Git or any optional Helper Script add-ons, a release ZIP/USB copy of this project can be used instead; **Moonraker/Nginx and Fluidd remain the only required Helper Script installs for the supported profile.**
