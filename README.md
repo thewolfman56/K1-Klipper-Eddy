@@ -93,3 +93,10 @@ Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an erro
 - The original upstream installer is retained as `legacy-install.sh` for reference and is **not** the recommended installation method for this fork.
 
 See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior and regression state this helper was derived from.
+
+
+## Reference documentation
+
+- Creality K1 root/SSH workflow: https://guilouz.github.io/Creality-Helper-Script-Wiki/firmwares/install-and-update-rooted-firmware-k1/
+- BIGTREETECH Eddy hardware/mounting: https://neo.bttwiki.com/zh/docs/accessories-docs/sensor/eddy/eddy-hardware
+- BIGTREETECH Eddy calibration reference: https://github.com/bigtreetech/Eddy
