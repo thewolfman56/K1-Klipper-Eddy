@@ -41,6 +41,8 @@ The napkin strip is not conductive, so Eddy **cannot measure the wipe surface di
 
 Read the full guide first: [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md).
 
+Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) for the Entware/Git bootstrap commands and the supported/blocked Helper Script add-on matrix.
+
 After rooting, mounting/flashing Eddy, and putting this repository on the printer:
 
 ```sh
