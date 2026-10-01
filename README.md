@@ -43,6 +43,8 @@ Read the full guide first: [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-E
 
 Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) for the Entware/Git bootstrap commands and the supported/blocked Helper Script add-on matrix.
 
+Validated optional Helper Script add-ons on the reference machine include **Improved Shapers Calibrations, Moonraker Timelapse, Camera Settings Control, OctoEverywhere, and Mobileraker Companion**. OctoEverywhere and Mobileraker required the K1-specific stock-Python/service-wrapper fixes documented in that guide.
+
 After rooting, mounting/flashing Eddy, and putting this repository on the printer:
 
 ```sh
