@@ -63,11 +63,19 @@ Printables model: **1286860**
 
 The napkin is non-conductive. Eddy cannot infer the wipe surface height, so **never copy another machine's wipe Z coordinates**. This repository intentionally ships with `NOZZLE_CLEAR` blocked until the individual printer is measured.
 
-## 6. Put this branch on the printer
+## 6. Prepare Moonraker / Fluidd and put this branch on the printer
 
-Firmware 2.3.5.33 installations may not have a useful Git client. The safest distribution method is therefore a release ZIP/USB copy.
+Before continuing, follow **[Creality Helper Script, Entware and Git — supported profile](CREALITY-HELPER-SCRIPT.md)**.
 
-For development, if Git works on the printer:
+For the supported configuration:
+
+- **Moonraker and Nginx are required** from the Creality Helper Script.
+- **Fluidd is required** for this guide.
+- Entware/Git are optional infrastructure if you want to clone/update repositories directly on the printer.
+- All other Helper Script items are optional, explicitly unsupported, or blocked as documented in the compatibility matrix.
+- Enable **Tools → Prevent updating Klipper configuration files** before installing the Eddy conversion.
+
+After Git is working, clone this branch:
 
 ```sh
 cd /usr/data
@@ -75,6 +83,8 @@ git clone -b k1max-cfs-eddy-duo-2.3.5.33 \
   https://github.com/thewolfman56/K1-Klipper-Eddy.git
 cd K1-Klipper-Eddy
 ```
+
+If you prefer not to install Git, a release ZIP/USB copy can be used instead.
 
 Before any write:
 
