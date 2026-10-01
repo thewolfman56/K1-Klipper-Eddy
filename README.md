@@ -19,7 +19,7 @@ The workflow is intentionally split into **calibration staging** and **native Ed
 - stages Eddy while PRTouch/TMC still owns Z so Eddy can be calibrated safely;
 - persists only Eddy calibration values instead of blindly saving unrelated Creality `SAVE_CONFIG` state;
 - switches `[stepper_z]` to `probe:z_virtual_endstop` only after calibration is present;
-- installs the validated cold-start Eddy clearance guard before any X/Y homing motion;
+- uses Eddy only as a connectivity check while XY is unknown, preserves Creality's bounded unhomed-Z-away move, and only trusts Eddy clearance after XY is centered over the bed;
 - retains Creality's deliberate two-pass sensorless X/Y homing;
 - routes CFS leveling to a fresh 20×20 `rapid_scan` Eddy mesh;
 - blocks nozzle wiping until the fixed napkin strip has been measured on that printer;
@@ -87,12 +87,13 @@ Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an erro
 | `persist` | Save only pending Eddy calibration values into `btteddy_mcu.cfg` |
 | `activate` | Enable native Eddy Z and the validated homing/CFS safety routing |
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
-| `status` | Show firmware, calibration, native-Z, safety-guard and wipe state |
+| `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards and wipe state |
 | `rollback <dir>` | Restore a helper-created backup |
 
 ## Important boundaries
 
 - **Do not copy another printer's Eddy calibration curve, USB serial, or napkin-strip Z values.** They are intentionally absent from this repository.
+- **Do not use Eddy `CLEAR_SIDE` as proof of physical clearance while XY is unknown.** The probe may be hanging off the bed; the validated cold-start path uses a connectivity-only Eddy check plus Creality's bounded Z-away move until XY is centered.
 - Do not run `activate` before drive-current and height-map calibration are persisted.
 - Do not use this branch as proof of compatibility with `2.3.5.34`, `2.3.5.35`, the newer `1.1.x` K1 Max firmware line, or a different motherboard/CFS-C conversion.
 - Creality firmware updates can overwrite patched Klipper files. Run `doctor`/`status` after any firmware change; this release should be treated as a `2.3.5.33` target only.
