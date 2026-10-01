@@ -983,7 +983,7 @@ def status(args):
     print("Height-map points:     %d" % points)
     print("Native Eddy Z:         %s" % ("ACTIVE" if native else "not active"))
     print("Pre-XY Eddy check:     %s" % ("present" if "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2" in sensorless else "missing"))
-    print("Bounded unknown-Z move:%s" % (" present" if "DISTANCE={printer[\\\"gcode_macro PRINTER_PARAM\\\"].z_safe_g28}" in sensorless else " missing"))
+    print("Bounded unknown-Z move:%s" % (" present" if "z_safe_g28} VELOCITY=10" in sensorless else " missing"))
     print("Pre-Z Eddy clearance:  %s" % ("present" if "EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000" in sensorless else "missing"))
     print("Unsafe off-bed guard:  %s" % ("ABSENT (good)" if "MARGIN=1.000 MAX_TRAVEL=5.000" not in sensorless else "PRESENT - REVIEW"))
     print("Fixed napkin wipe:     %s" % ("configured" if WIPE_MARKER in macros else "NOT CONFIGURED"))
