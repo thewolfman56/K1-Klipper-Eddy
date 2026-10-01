@@ -45,6 +45,8 @@ Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER
 
 Validated optional Helper Script add-ons on the reference machine include **Improved Shapers Calibrations, Moonraker Timelapse, Camera Settings Control, OctoEverywhere, and Mobileraker Companion**. OctoEverywhere and Mobileraker required the K1-specific stock-Python/service-wrapper fixes documented in that guide.
 
+`sh install.sh doctor` now audits those optional components without changing them. It reports `PASS`, `INFO`, or `WARN` for Camera Settings Control, OctoEverywhere, and Mobileraker, including stock-vs-Entware Python, K1 `exec` wrappers, process counts, and PID-file consistency.
+
 After rooting, mounting/flashing Eddy, and putting this repository on the printer:
 
 ```sh
@@ -79,7 +81,7 @@ Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an erro
 
 | Command | Purpose |
 |---|---|
-| `doctor` | Read-only firmware/CFS/Eddy/preflight checks |
+| `doctor` | Read-only firmware/CFS/Eddy preflight plus validated optional add-on audit |
 | `backup` | Create a timestamped rollback snapshot |
 | `stage` | Install Eddy support for calibration while PRTouch/TMC still owns Z |
 | `persist` | Save only pending Eddy calibration values into `btteddy_mcu.cfg` |
