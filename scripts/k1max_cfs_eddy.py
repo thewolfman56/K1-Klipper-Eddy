@@ -507,6 +507,11 @@ def replace_section(text, header, new_section):
 
 
 def patch_stage_sensorless(path):
+    """Keep Creality's bounded unknown-Z move while Eddy is staged.
+
+    Eddy may be physically off-bed before XY is homed, so it must not be used
+    as a clearance sensor at this point.
+    """
     text = read_text(path)
     header = "[gcode_macro _IF_HOME_Z]"
     if header not in text:
@@ -522,9 +527,11 @@ gcode:
     {% endif %}
   {% else %}
     {% if printer['gcode_macro xyz_ready'].z_moved|int == 0 %}
-      {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
-        {action_respond_info("Eddy staging: skipping stock unhomed Z FORCE_MOVE")}
-      {% elif printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
+      # BTT Eddy / cold-start safety:
+      # XY may be unknown here, so the Eddy probe may be hanging
+      # outside the bed and cannot be trusted as a clearance sensor.
+      # Use Creality's original bounded Z-away move before XY homing.
+      {% if printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
         FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10
       {% else %}
         FORCE_MOVE STEPPER=stepper_z DISTANCE=0.1 VELOCITY=10
@@ -705,10 +712,66 @@ def patch_stepper_z(path):
     atomic_write(path, "\n".join(out).rstrip() + "\n")
 
 
+def patch_homing_override_safety(text):
+    """Add the validated connectivity-only pre-XY Eddy check.
+
+    When XY is unknown the probe can be off-bed.  EDDY_HOME_STATUS is used
+    only to prove the Eddy MCU/sensor is responsive; CLEAR_SIDE is not treated
+    as physical nozzle clearance until XY geometry is known.
+    """
+    section_header = "[homing_override]"
+    lines = text.splitlines(True)
+    start = None
+    end = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip() == section_header:
+            start = i
+            break
+    if start is None:
+        raise Stop("Expected [homing_override] section not found.")
+    for i in range(start + 1, len(lines)):
+        s = lines[i].strip()
+        if s.startswith("[") and s.endswith("]"):
+            end = i
+            break
+
+    block = "".join(lines[start:end])
+    first = "  {% if x_axes is not defined or x_axes[2] is not defined %}"
+    following = (
+        "  {% if x_axes is defined and x_axes[0] is defined "
+        "and x_axes[1] is defined %}"
+    )
+    a = block.find(first)
+    b = block.find(following, a + len(first))
+    if a < 0 or b < 0:
+        raise Stop(
+            "Expected unknown-Z block in [homing_override] was not found."
+        )
+
+    safe = """  {% if x_axes is not defined or x_axes[2] is not defined %}
+    BED_MESH_CLEAR
+
+    # BTT Eddy connectivity check ONLY.
+    # XY is not yet known, so the probe may be off-bed.
+    # Do not interpret CLEAR_SIDE here as physical nozzle clearance.
+    # This command performs no intentional motion and prevents homing
+    # from continuing if the Eddy MCU/sensor is unavailable.
+    {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
+      {action_respond_info("Checking BTT Eddy connectivity before homing; clearance is NOT evaluated until XY is known\\n")}
+      EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2
+    {% endif %}
+  {% endif %}
+
+"""
+    new_block = block[:a] + safe + block[b:]
+    return "".join(lines[:start]) + new_block + "".join(lines[end:])
+
+
 def patch_native_homing(sensorless):
     text = read_text(sensorless)
     if "[gcode_macro _IF_HOME_Z]" not in text or "[gcode_macro _HOME_Z]" not in text:
         raise Stop("Expected K1 Max sensorless macros not found")
+
     guard = """[gcode_macro _IF_HOME_Z]
 gcode:
   {% if printer['gcode_macro xyz_ready'].z_ready|int == 1 %}
@@ -720,10 +783,11 @@ gcode:
     {% endif %}
   {% else %}
     {% if printer['gcode_macro xyz_ready'].z_moved|int == 0 %}
-      {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
-        BED_MESH_CLEAR
-        EDDY_PREHOME_CLEAR MARGIN=1.000 MAX_TRAVEL=5.000
-      {% elif printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
+      # BTT Eddy / cold-start safety:
+      # XY may be unknown here, so the Eddy probe may be hanging
+      # outside the bed and cannot be trusted as a clearance sensor.
+      # Use Creality's original bounded Z-away move before XY homing.
+      {% if printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
         FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10
       {% else %}
         FORCE_MOVE STEPPER=stepper_z DISTANCE=0.1 VELOCITY=10
@@ -731,6 +795,7 @@ gcode:
       SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_moved VALUE=1
     {% endif %}
   {% endif %}"""
+
     homez = """[gcode_macro _HOME_Z]
 gcode:
   {% if printer['gcode_macro xyz_ready'].y_ready|int == 1 %}
@@ -738,7 +803,12 @@ gcode:
       _IF_HOME_Z
     {% endif %}
   {% endif %}
-  {% if printer.print_stats.z_pos|float >= 260.0 %}
+  # Preserve Creality's high-Z recovery for non-Eddy probes.
+  # With Eddy, do not blindly move the bed 8mm toward the nozzle
+  # based on persisted z_pos. Once XY is centered, live Eddy
+  # feedback and native probe homing establish the real Z position.
+  {% if 'probe_eddy_current btt_eddy' not in printer.configfile.settings
+        and printer.print_stats.z_pos|float >= 260.0 %}
     FORCE_MOVE STEPPER=stepper_z DISTANCE=-8 VELOCITY=10
   {% endif %}
 
@@ -751,15 +821,21 @@ gcode:
   {action_respond_info("y_park = %s \\n" % (y_park))}
   G1 x{x_park} y{y_park} F3600
   G90
+
+  # Wait until XY is physically centered before trusting Eddy clearance.
   M400
   G4 P500
+
   {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
     EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000
   {% endif %}
+
   G28 Z
   SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_ready VALUE=1"""
+
     text = replace_section(text, "[gcode_macro _IF_HOME_Z]", guard)
     text = replace_section(text, "[gcode_macro _HOME_Z]", homez)
+    text = patch_homing_override_safety(text)
     atomic_write(sensorless, text)
 
 
@@ -906,8 +982,10 @@ def status(args):
     print("Drive current:         %s" % (reg or "missing"))
     print("Height-map points:     %d" % points)
     print("Native Eddy Z:         %s" % ("ACTIVE" if native else "not active"))
-    print("Cold-start XY guard:   %s" % ("present" if "MARGIN=1.000 MAX_TRAVEL=5.000" in sensorless else "missing"))
-    print("Pre-Z guard:           %s" % ("present" if "MAX_TRAVEL=2.000" in sensorless else "missing"))
+    print("Pre-XY Eddy check:     %s" % ("present" if "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2" in sensorless else "missing"))
+    print("Bounded unknown-Z move:%s" % (" present" if "DISTANCE={printer[\\\"gcode_macro PRINTER_PARAM\\\"].z_safe_g28}" in sensorless else " missing"))
+    print("Pre-Z Eddy clearance:  %s" % ("present" if "EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000" in sensorless else "missing"))
+    print("Unsafe off-bed guard:  %s" % ("ABSENT (good)" if "MARGIN=1.000 MAX_TRAVEL=5.000" not in sensorless else "PRESENT - REVIEW"))
     print("Fixed napkin wipe:     %s" % ("configured" if WIPE_MARKER in macros else "NOT CONFIGURED"))
 
 
