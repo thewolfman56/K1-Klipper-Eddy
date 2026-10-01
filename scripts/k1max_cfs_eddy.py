@@ -107,6 +107,209 @@ def moonraker_json(path):
         return json.loads(r.read().decode("utf-8"))
 
 
+def process_ids(root, needle):
+    """Return PIDs whose /proc/<pid>/cmdline contains needle."""
+    proc = root_path(root, "/proc")
+    if not proc.exists():
+        return []
+    found = []
+    try:
+        entries = proc.iterdir()
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        cmdline = entry / "cmdline"
+        try:
+            data = cmdline.read_bytes().replace(b"\x00", b" ").decode(
+                "utf-8", errors="replace"
+            )
+        except OSError:
+            continue
+        if needle in data:
+            found.append(int(entry.name))
+    return sorted(found)
+
+
+def read_pid(path):
+    try:
+        return int(Path(path).read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def addon_audit(root):
+    """Read-only audit of optional add-ons validated on the reference K1 Max."""
+    cfg = root_path(root, "/usr/data/printer_data/config")
+    printer = read_text(cfg / "printer.cfg")
+    entware_python = root_path(root, "/opt/bin/python3").exists()
+    findings = []
+
+    def add(level, name, message):
+        findings.append((level, name, message))
+
+    # Camera Settings Control
+    camera_cfg = cfg / "Helper-Script/camera-settings.cfg"
+    camera_installed = (
+        "Helper-Script/camera-settings.cfg" in printer
+        or camera_cfg.exists()
+    )
+    if camera_installed:
+        if "Helper-Script/camera-settings.cfg" in printer:
+            add("PASS", "Camera Settings Control",
+                "validated config include is present")
+        else:
+            add("WARN", "Camera Settings Control",
+                "camera-settings.cfg exists but printer.cfg does not include it")
+    else:
+        add("INFO", "Camera Settings Control", "not installed")
+
+    # OctoEverywhere
+    oe_repo = root_path(root, "/usr/data/octoeverywhere")
+    oe_service = root_path(root, "/etc/init.d/S66octoeverywhere_service")
+    oe_cfg = cfg / "octoeverywhere-system.cfg"
+    oe_installed = oe_repo.exists() or oe_service.exists() or oe_cfg.exists()
+    if oe_installed:
+        oe_install = read_text(oe_repo / "install.sh")
+        oe_run_candidates = [
+            root_path(
+                root,
+                "/usr/data/printer_data/octoeverywhere-store/"
+                "run-octoeverywhere-service.sh",
+            ),
+            root_path(
+                root,
+                "/usr/data/octoeverywhere-store/run-octoeverywhere-service.sh",
+            ),
+        ]
+        oe_run = next((x for x in oe_run_candidates if x.exists()), None)
+        oe_run_text = read_text(oe_run) if oe_run else ""
+
+        if entware_python:
+            add("WARN", "OctoEverywhere",
+                "/opt/bin/python3 exists; validated profile used stock "
+                "Creality Python 3.8")
+        else:
+            add("PASS", "OctoEverywhere",
+                "Entware Python is absent (validated runtime profile)")
+
+        if "DisableMoonrakerConfigFileWrites" in oe_install:
+            add("PASS", "OctoEverywhere",
+                "DisableMoonrakerConfigFileWrites patch/behavior marker found")
+        else:
+            add("INFO", "OctoEverywhere",
+                "historical DisableMoonrakerConfigFileWrites marker not "
+                "visible; inspect newer upstream behavior before patching")
+
+        if oe_run is None:
+            add("WARN", "OctoEverywhere",
+                "K1 run-octoeverywhere-service.sh was not found")
+        elif re.search(r"(?m)^\s*exec\s+", oe_run_text):
+            add("PASS", "OctoEverywhere",
+                "K1 service wrapper uses exec")
+        else:
+            add("WARN", "OctoEverywhere",
+                "K1 service wrapper does not use exec; PID duplication is "
+                "possible")
+
+        oe_pids = process_ids(root, "moonraker_octoeverywhere")
+        oe_pidfile = read_pid(root_path(root, "/var/run/octoeverywhere.pid"))
+        if len(oe_pids) == 1:
+            add("PASS", "OctoEverywhere",
+                "exactly one runtime process found (PID %d)" % oe_pids[0])
+        elif len(oe_pids) > 1:
+            add("WARN", "OctoEverywhere",
+                "multiple runtime processes found: %s" %
+                ", ".join(str(x) for x in oe_pids))
+        else:
+            add("INFO", "OctoEverywhere",
+                "no runtime process found (service may be stopped)")
+
+        if oe_pidfile is not None and oe_pids:
+            if oe_pidfile in oe_pids:
+                add("PASS", "OctoEverywhere",
+                    "PID file matches a running OctoEverywhere process")
+            else:
+                add("WARN", "OctoEverywhere",
+                    "PID file %d does not match running process(es) %s" %
+                    (oe_pidfile, ", ".join(str(x) for x in oe_pids)))
+    else:
+        add("INFO", "OctoEverywhere", "not installed")
+
+    # Mobileraker Companion
+    mr_repo = root_path(root, "/usr/data/mobileraker_companion")
+    mr_service_candidates = [
+        root_path(root, "/etc/init.d/S80mobileraker_service"),
+        root_path(root, "/etc/init.d/S80mobileraker"),
+    ]
+    mr_installed = mr_repo.exists() or any(x.exists() for x in mr_service_candidates)
+    if mr_installed:
+        mr_install = read_text(mr_repo / "scripts/install.sh")
+        mr_run = mr_repo / ".k1/run-companion-service.sh"
+        mr_run_text = read_text(mr_run)
+
+        if entware_python:
+            add("WARN", "Mobileraker Companion",
+                "/opt/bin/python3 exists; validated profile kept Entware "
+                "Python absent")
+        else:
+            add("PASS", "Mobileraker Companion",
+                "Entware Python is absent (validated runtime profile)")
+
+        if (
+            "using stock Creality Python 3.8" in mr_install
+            or "skipping Entware Python/PIP/Pillow" in mr_install
+        ):
+            add("PASS", "Mobileraker Companion",
+                "stock-Python K1 bootstrap marker found")
+        else:
+            add("INFO", "Mobileraker Companion",
+                "historical stock-Python bootstrap marker not visible; "
+                "inspect newer upstream installer before patching")
+
+        if not mr_run.exists():
+            add("WARN", "Mobileraker Companion",
+                ".k1/run-companion-service.sh was not found")
+        elif re.search(r"(?m)^\s*exec\s+", mr_run_text):
+            add("PASS", "Mobileraker Companion",
+                "K1 service wrapper uses exec")
+        else:
+            add("WARN", "Mobileraker Companion",
+                "K1 service wrapper does not use exec")
+
+        mr_pids = process_ids(root, "mobileraker.py")
+        mr_pidfile = read_pid(root_path(root, "/var/run/mobileraker.pid"))
+        if len(mr_pids) == 1:
+            add("PASS", "Mobileraker Companion",
+                "exactly one runtime process found (PID %d)" % mr_pids[0])
+        elif len(mr_pids) > 1:
+            add("WARN", "Mobileraker Companion",
+                "multiple runtime processes found: %s" %
+                ", ".join(str(x) for x in mr_pids))
+        else:
+            add("INFO", "Mobileraker Companion",
+                "no runtime process found (service may be stopped)")
+
+        if mr_pidfile is not None and mr_pids:
+            if mr_pidfile in mr_pids:
+                add("PASS", "Mobileraker Companion",
+                    "PID file matches the running Mobileraker process")
+            else:
+                add("WARN", "Mobileraker Companion",
+                    "PID file %d does not match running process(es) %s" %
+                    (mr_pidfile, ", ".join(str(x) for x in mr_pids)))
+    else:
+        add("INFO", "Mobileraker Companion", "not installed")
+
+    print("\nOptional add-on audit (read-only)")
+    for level, name, message in findings:
+        print("  %-4s %-26s %s" % (level, name + ":", message))
+    warnings = sum(1 for level, _, _ in findings if level == "WARN")
+    print("  Summary: %d warning(s); no files were changed." % warnings)
+    return findings
+
+
 def assert_idle(root):
     if str(root) != "/":
         return
@@ -130,6 +333,8 @@ def doctor(args, write=False):
     print("  CFS box:   %s" % ("found" if p["box"].exists() else "MISSING"))
     serial = detect_eddy_serial(args.root)
     print("  Eddy USB:  %s" % (serial or "not uniquely detected"))
+
+    addon_audit(args.root)
 
     if fw != SUPPORTED_FW and not args.force_unsupported:
         raise Stop("Expected firmware %s; detected %s. Use --force-unsupported only for development."
