@@ -40,25 +40,94 @@ position_max: 300
 variable_x_ready: 0
 variable_y_ready: 0
 variable_z_ready: 0
+variable_xy_moved: 0
 variable_z_moved: 0
+gcode:
+
+[gcode_macro PRINTER_PARAM]
+variable_z_safe_g28: 3.0
+variable_max_y_position: 300
 gcode:
 
 [gcode_macro _IF_HOME_Z]
 gcode:
-  FORCE_MOVE STEPPER=stepper_z DISTANCE=2 VELOCITY=10
+  {% if printer['gcode_macro xyz_ready'].z_ready|int == 1 %}
+    {% if printer.toolhead.position.z|int < 5 %}
+      {% set z_park = 5.0 - printer.toolhead.position.z|int %}
+      G91
+      G1 z{z_park} F600
+      G90
+    {% endif %}
+  {% else %}
+    {% if printer['gcode_macro xyz_ready'].z_moved|int == 0 %}
+      {% if printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
+        FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10
+      {% else %}
+        FORCE_MOVE STEPPER=stepper_z DISTANCE=0.1 VELOCITY=10
+      {% endif %}
+      SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_moved VALUE=1
+    {% endif %}
+  {% endif %}
+
+[gcode_macro _IF_MOVE_XY]
+gcode:
+  _IF_HOME_Z
+
+[gcode_macro _HOME_Y]
+gcode:
+  _IF_MOVE_XY
+
+[gcode_macro _HOME_X]
+gcode:
+  _IF_MOVE_XY
 
 [gcode_macro _HOME_Z]
 gcode:
+  {% if printer.print_stats.z_pos|float >= 260.0 %}
+    FORCE_MOVE STEPPER=stepper_z DISTANCE=-8 VELOCITY=10
+  {% endif %}
   G28 Z
 
 [homing_override]
 axes: xyz
 gcode:
-  _HOME_Y
-  _HOME_Y
-  _HOME_X
-  _HOME_X
-  _HOME_Z
+  M220 S100
+  {% set x_axes = printer.toolhead.homed_axes %}
+  {% if x_axes is defined and x_axes[0] is defined %}
+    {action_respond_info("x_axes: %s \\n" % (x_axes))}
+  {% else %}
+    SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=x_ready VALUE=0
+    SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=y_ready VALUE=0
+    SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_ready VALUE=0
+    SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=xy_moved VALUE=0
+    SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_moved VALUE=0
+    {action_respond_info("x_axes is NULL\\n")}
+  {% endif %}
+
+  {% if x_axes is not defined or x_axes[2] is not defined %}
+    BED_MESH_CLEAR
+  {% endif %}
+
+  {% if x_axes is defined and x_axes[0] is defined and x_axes[1] is defined %}
+    {action_respond_info("x_axes: %s \\n" % (x_axes))}
+  {% endif %}
+
+  {% set home_all = 'X' not in params and 'Y' not in params %}
+  {% if home_all or 'Y' in params %}
+    _HOME_Y
+  {% endif %}
+  {% if home_all or 'Y' in params %}
+    _HOME_Y
+  {% endif %}
+  {% if home_all or 'X' in params %}
+    _HOME_X
+  {% endif %}
+  {% if home_all or 'X' in params %}
+    _HOME_X
+  {% endif %}
+  {% if home_all or 'Z' in params %}
+    _HOME_Z
+  {% endif %}
 """)
         write(root, "/usr/data/printer_data/config/gcode_macro.cfg", """[gcode_macro ACCURATE_G28]
 gcode:
@@ -187,6 +256,31 @@ gcode:
             self.assertIn("PID file 999 does not match", out)
             self.assertIn("WARN Mobileraker Companion:", out)
 
+    def test_stage_keeps_bounded_unknown_z_move_without_off_bed_eddy_clearance(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+            sensorless = (
+                root / "usr/data/printer_data/config/sensorless.cfg"
+            ).read_text()
+
+            self.assertIn(
+                'FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10',
+                sensorless,
+            )
+            self.assertNotIn(
+                "EDDY_PREHOME_CLEAR MARGIN=1.000 MAX_TRAVEL=5.000",
+                sensorless,
+            )
+            self.assertNotIn(
+                "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
+                sensorless,
+            )
+
     def test_complete_staged_flow_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -224,8 +318,19 @@ gcode:
             sensorless = (cfg / "sensorless.cfg").read_text()
             self.assertIn("endstop_pin: probe:z_virtual_endstop", printer)
             self.assertNotIn("position_endstop:", printer)
-            self.assertIn(
+            self.assertNotIn(
                 "EDDY_PREHOME_CLEAR MARGIN=1.000 MAX_TRAVEL=5.000",
+                sensorless,
+            )
+            self.assertIn(
+                "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2", sensorless
+            )
+            self.assertIn(
+                'FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10',
+                sensorless,
+            )
+            self.assertIn(
+                "'probe_eddy_current btt_eddy' not in printer.configfile.settings",
                 sensorless,
             )
             self.assertIn(
@@ -233,6 +338,12 @@ gcode:
             )
             self.assertGreaterEqual(sensorless.count("_HOME_Y"), 2)
             self.assertGreaterEqual(sensorless.count("_HOME_X"), 2)
+
+            status = self.run_helper(root, "status").stdout
+            self.assertIn("Pre-XY Eddy check:     present", status)
+            self.assertIn("Bounded unknown-Z move: present", status)
+            self.assertIn("Pre-Z Eddy clearance:  present", status)
+            self.assertIn("Unsafe off-bed guard:  ABSENT (good)", status)
 
             self.run_helper(
                 root, "configure-wipe",
