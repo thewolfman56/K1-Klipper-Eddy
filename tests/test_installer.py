@@ -68,6 +68,125 @@ gcode:
         write(root, "/usr/share/klipper/klippy/extras/bed_mesh.py", "# stock creality bed mesh\n")
         write(root, "/dev/serial/by-id/usb-Klipper_rp2040_TEST-if00", "")
 
+    def install_validated_optional_addons(self, root):
+        cfg = root / "usr/data/printer_data/config"
+        printer = (cfg / "printer.cfg").read_text()
+        (cfg / "printer.cfg").write_text(
+            "[include Helper-Script/camera-settings.cfg]\n" + printer
+        )
+        write(
+            root,
+            "/usr/data/printer_data/config/Helper-Script/camera-settings.cfg",
+            "[gcode_macro CAM_SETTINGS]\ngcode:\n  RESPOND MSG=camera\n",
+        )
+
+        write(
+            root,
+            "/usr/data/octoeverywhere/install.sh",
+            'PY_LAUNCH_JSON="DisableMoonrakerConfigFileWrites"\n',
+        )
+        write(
+            root,
+            "/usr/data/printer_data/octoeverywhere-store/"
+            "run-octoeverywhere-service.sh",
+            "#!/bin/sh\nexport PYTHONPATH=/usr/data/octoeverywhere\n"
+            "exec /usr/data/octoeverywhere-env/bin/python3 "
+            "-m moonraker_octoeverywhere test\n",
+        )
+        write(
+            root,
+            "/etc/init.d/S66octoeverywhere_service",
+            "#!/bin/sh\n",
+        )
+        write(
+            root,
+            "/usr/data/printer_data/config/octoeverywhere-system.cfg",
+            "[octoeverywhere]\n",
+        )
+        write(
+            root,
+            "/proc/111/cmdline",
+            "python3\x00-m\x00moonraker_octoeverywhere\x00",
+        )
+        write(root, "/var/run/octoeverywhere.pid", "111\n")
+
+        write(
+            root,
+            "/usr/data/mobileraker_companion/scripts/install.sh",
+            'echo "K1: using stock Creality Python 3.8; '
+            'skipping Entware Python/PIP/Pillow install."\n',
+        )
+        write(
+            root,
+            "/usr/data/mobileraker_companion/.k1/run-companion-service.sh",
+            "#!/bin/sh\n"
+            "export PYTHONPATH=/usr/data/mobileraker_companion\n"
+            "exec /usr/data/mobileraker-env/bin/python3 "
+            "/usr/data/mobileraker_companion/mobileraker.py\n",
+        )
+        write(
+            root,
+            "/etc/init.d/S80mobileraker_service",
+            "#!/bin/sh\n",
+        )
+        write(
+            root,
+            "/proc/222/cmdline",
+            "/usr/data/mobileraker-env/bin/python3\x00"
+            "/usr/data/mobileraker_companion/mobileraker.py\x00",
+        )
+        write(root, "/var/run/mobileraker.pid", "222\n")
+
+    def test_doctor_audits_validated_optional_addons(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+            self.install_validated_optional_addons(root)
+
+            out = self.run_helper(root, "doctor").stdout
+
+            self.assertIn("Optional add-on audit (read-only)", out)
+            self.assertIn("PASS Camera Settings Control:", out)
+            self.assertIn("PASS OctoEverywhere:", out)
+            self.assertIn("K1 service wrapper uses exec", out)
+            self.assertIn("exactly one runtime process found (PID 111)", out)
+            self.assertIn("PASS Mobileraker Companion:", out)
+            self.assertIn("stock-Python K1 bootstrap marker found", out)
+            self.assertIn("exactly one runtime process found (PID 222)", out)
+            self.assertIn("Summary: 0 warning(s); no files were changed.", out)
+
+    def test_doctor_warns_on_risky_optional_addon_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+            self.install_validated_optional_addons(root)
+
+            write(root, "/opt/bin/python3", "# fake Entware Python\n")
+            write(
+                root,
+                "/usr/data/printer_data/octoeverywhere-store/"
+                "run-octoeverywhere-service.sh",
+                "#!/bin/sh\n"
+                "PYTHONPATH=/usr/data/octoeverywhere "
+                "/usr/data/octoeverywhere-env/bin/python3 "
+                "-m moonraker_octoeverywhere test\n",
+            )
+            write(
+                root,
+                "/proc/112/cmdline",
+                "python3\x00-m\x00moonraker_octoeverywhere\x00",
+            )
+            write(root, "/var/run/octoeverywhere.pid", "999\n")
+
+            out = self.run_helper(root, "doctor").stdout
+
+            self.assertIn("WARN OctoEverywhere:", out)
+            self.assertIn("/opt/bin/python3 exists", out)
+            self.assertIn("does not use exec", out)
+            self.assertIn("multiple runtime processes found: 111, 112", out)
+            self.assertIn("PID file 999 does not match", out)
+            self.assertIn("WARN Mobileraker Companion:", out)
+
     def test_complete_staged_flow_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
