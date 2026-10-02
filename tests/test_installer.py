@@ -455,6 +455,113 @@ def get_printer_mcu(printer, name):
             self.assertIn("DRIFT           sensorless.cfg:", proc.stdout)
             self.assertIn("Result: REVIEW REQUIRED", proc.stdout)
 
+    def make_release_ready_install(self, root):
+        self.make_root(root)
+        self.run_helper(
+            root, "stage", "--x-offset", "-23", "--y-offset", "0"
+        )
+        pairs = ",".join(
+            "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+            for i in range(60)
+        )
+        pending = root / "pending.json"
+        pending.write_text(json.dumps({
+            "probe_eddy_current btt_eddy": {
+                "reg_drive_current": "16",
+                "calibrate": pairs,
+            }
+        }))
+        self.run_helper(
+            root, "persist", "--pending-json", str(pending)
+        )
+        self.run_helper(root, "activate")
+        self.run_helper(
+            root, "configure-wipe",
+            "--start-x", "70.5", "--start-y", "305.5",
+            "--start-surface-z", "4.2",
+            "--end-x", "90.5", "--end-y", "305.5",
+            "--end-surface-z", "4.35",
+            "--confirm-measured",
+        )
+
+    def test_release_readiness_accepts_validated_public_install_with_warning(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_release_ready_install(root)
+
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--root", str(root),
+                    "release-readiness",
+                ],
+                cwd=REPO, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn(
+                "K1 Max + CFS + BTT Eddy release-readiness",
+                proc.stdout,
+            )
+            self.assertIn("PASS  Firmware:", proc.stdout)
+            self.assertIn(
+                "PASS  Production homing safety:", proc.stdout
+            )
+            self.assertIn(
+                "PASS  extras/upgrade/ldc1612.py:", proc.stdout
+            )
+            self.assertIn(
+                "PASS  extras/upgrade/probe_eddy_current.py:",
+                proc.stdout,
+            )
+            self.assertIn(
+                "PASS  extras/upgrade/bulk_sensor.py:", proc.stdout
+            )
+            self.assertIn(
+                "WARN  eddy_z_acquire.py:", proc.stdout
+            )
+            self.assertIn(
+                "PASS  Optional add-ons:", proc.stdout
+            )
+            self.assertIn(
+                "PASS  Firmware-update snapshot:", proc.stdout
+            )
+            self.assertIn(
+                "PASS  Repository files:", proc.stdout
+            )
+            self.assertIn(
+                "Release readiness: READY WITH WARNINGS",
+                proc.stdout,
+            )
+
+    def test_release_readiness_fails_on_core_safety_drift(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_release_ready_install(root)
+
+            sensorless = (
+                root / "usr/data/printer_data/config/sensorless.cfg"
+            )
+            sensorless.write_text(
+                sensorless.read_text().replace(
+                    "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
+                    "EDDY_HOME_STATUS SAMPLES=25 TIMEOUT=2",
+                )
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--root", str(root),
+                    "release-readiness",
+                ],
+                cwd=REPO, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 5)
+            self.assertIn(
+                "FAIL  Production homing safety:", proc.stdout
+            )
+            self.assertIn(
+                "Release readiness: NOT READY", proc.stdout
+            )
+
     def test_firmware_update_snapshot_and_no_change_audit(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
