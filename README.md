@@ -85,6 +85,14 @@ sh install.sh verify-production
 
 `EXACT` means the file SHA256 matches the final reference snapshot. `EXPECTED CUSTOM` means bytes differ for an allowed printer-specific reason (for example USB serial, calibration curve, includes, or measured napkin coordinates) while the required safety structure still validates. `DRIFT` means a required file is missing or its validated safety/compatibility contract no longer matches.
 
+For one final release-candidate check, run:
+
+```sh
+sh install.sh release-readiness
+```
+
+The readiness command is also read-only. Core safety/integrity problems produce `FAIL` and exit code 5. Optional add-on or repository-working-tree concerns produce `WARN` without turning an otherwise safe printer into a false failure. Because the public `eddy_z_acquire.py` is safety-contract validated but is not falsely claimed to be byte-identical to the unrecovered production helper, the current public build may legitimately report `READY WITH WARNINGS`.
+
 Before any future Creality firmware update, create a separate update baseline:
 
 ```sh
@@ -111,6 +119,7 @@ The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and recheck
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
 | `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
 | `verify-production` | Read-only comparison against the final production snapshot; reports `EXACT`, `EXPECTED CUSTOM`, or `DRIFT` and exits nonzero on drift |
+| `release-readiness` | Read-only aggregate PASS/WARN/INFO/FAIL release audit across firmware, calibration, homing safety, native Z, wipe, compatibility sources, optional add-ons, update-snapshot readiness, and repository integrity |
 | `pre-update-snapshot` | Verify the working installation, then preserve the full printer config and update-sensitive Klipper/service files before a firmware update |
 | `audit-after-update <snapshot>` | Read-only post-update comparison showing exactly which captured files were changed, removed, or added; performs no repair |
 | `rollback <dir>` | Restore a helper-created backup |
