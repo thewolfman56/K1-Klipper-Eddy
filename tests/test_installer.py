@@ -7,6 +7,57 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "k1max_cfs_eddy.py"
+FIXTURES = REPO / "tests" / "fixtures"
+
+
+def fixture(name):
+    return (FIXTURES / name).read_text()
+
+
+def section_core(text, header):
+    lines = text.splitlines(True)
+    start = None
+    end = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip() == header:
+            start = i
+            break
+    if start is None:
+        raise AssertionError("section not found: %s" % header)
+    for i in range(start + 1, len(lines)):
+        s = lines[i].strip()
+        if s.startswith("[") and s.endswith("]"):
+            end = i
+            break
+    return "".join(lines[start:end]).rstrip("\n") + "\n"
+
+
+def pre_xy_block(text):
+    block = section_core(text, "[homing_override]")
+    first = "  {% if x_axes is not defined or x_axes[2] is not defined %}"
+    following = (
+        "  {% if x_axes is defined and x_axes[0] is defined "
+        "and x_axes[1] is defined %}"
+    )
+    a = block.find(first)
+    b = block.find(following, a + len(first))
+    if a < 0 or b < 0:
+        raise AssertionError("unknown-Z block not found")
+    return block[a:b]
+
+
+def homing_override_without_pre_xy(text):
+    block = section_core(text, "[homing_override]")
+    first = "  {% if x_axes is not defined or x_axes[2] is not defined %}"
+    following = (
+        "  {% if x_axes is defined and x_axes[0] is defined "
+        "and x_axes[1] is defined %}"
+    )
+    a = block.find(first)
+    b = block.find(following, a + len(first))
+    if a < 0 or b < 0:
+        raise AssertionError("unknown-Z block not found")
+    return block[:a] + "<VALIDATED_PRE_XY_BLOCK>\n" + block[b:]
 
 
 def write(root, rel, text):
@@ -280,6 +331,10 @@ gcode:
                 "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
                 sensorless,
             )
+            self.assertEqual(
+                section_core(sensorless, "[gcode_macro _IF_HOME_Z]"),
+                fixture("validated_if_home_z.cfg"),
+            )
 
     def test_complete_staged_flow_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
@@ -312,6 +367,20 @@ gcode:
             self.run_helper(
                 root, "persist", "--pending-json", str(pending)
             )
+
+            staged_sensorless = (cfg / "sensorless.cfg").read_text()
+            preserved_sections = {
+                header: section_core(staged_sensorless, header)
+                for header in (
+                    "[gcode_macro _IF_MOVE_XY]",
+                    "[gcode_macro _HOME_Y]",
+                    "[gcode_macro _HOME_X]",
+                )
+            }
+            preserved_homing_override = homing_override_without_pre_xy(
+                staged_sensorless
+            )
+
             self.run_helper(root, "activate")
 
             printer = (cfg / "printer.cfg").read_text()
@@ -338,6 +407,30 @@ gcode:
             )
             self.assertGreaterEqual(sensorless.count("_HOME_Y"), 2)
             self.assertGreaterEqual(sensorless.count("_HOME_X"), 2)
+
+            self.assertEqual(
+                section_core(sensorless, "[gcode_macro _IF_HOME_Z]"),
+                fixture("validated_if_home_z.cfg"),
+            )
+            self.assertEqual(
+                section_core(sensorless, "[gcode_macro _HOME_Z]"),
+                fixture("validated_home_z.cfg"),
+            )
+            self.assertEqual(
+                pre_xy_block(sensorless),
+                fixture("validated_pre_xy_block.txt"),
+            )
+            for header, before in preserved_sections.items():
+                self.assertEqual(
+                    section_core(sensorless, header),
+                    before,
+                    "activation changed untouched section %s" % header,
+                )
+            self.assertEqual(
+                homing_override_without_pre_xy(sensorless),
+                preserved_homing_override,
+                "activation changed homing_override outside pre-XY safety block",
+            )
 
             status = self.run_helper(root, "status").stdout
             self.assertIn("Pre-XY Eddy check:     present", status)
