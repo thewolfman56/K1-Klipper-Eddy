@@ -357,6 +357,104 @@ def get_printer_mcu(printer, name):
                 sensorless,
             )
 
+    def test_verify_production_accepts_expected_machine_specific_differences(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+            pairs = ",".join(
+                "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+                for i in range(60)
+            )
+            pending = root / "pending.json"
+            pending.write_text(json.dumps({
+                "probe_eddy_current btt_eddy": {
+                    "reg_drive_current": "16",
+                    "calibrate": pairs,
+                }
+            }))
+            self.run_helper(
+                root, "persist", "--pending-json", str(pending)
+            )
+            self.run_helper(root, "activate")
+            self.run_helper(
+                root, "configure-wipe",
+                "--start-x", "70.5", "--start-y", "305.5",
+                "--start-surface-z", "4.2",
+                "--end-x", "90.5", "--end-y", "305.5",
+                "--end-surface-z", "4.35",
+                "--confirm-measured",
+            )
+
+            out = self.run_helper(root, "verify-production").stdout
+            self.assertIn(
+                "K1 Max + CFS + BTT Eddy production verification", out
+            )
+            self.assertIn("EXPECTED CUSTOM sensorless.cfg:", out)
+            self.assertIn("EXPECTED CUSTOM printer.cfg:", out)
+            self.assertIn("EXPECTED CUSTOM btteddy_mcu.cfg:", out)
+            self.assertIn("EXPECTED CUSTOM eddy_nozzle_clear.cfg:", out)
+            self.assertIn("EXACT           extras/upgrade/ldc1612.py:", out)
+            self.assertIn(
+                "EXACT           extras/upgrade/probe_eddy_current.py:", out
+            )
+            self.assertIn(
+                "EXACT           extras/upgrade/bulk_sensor.py:", out
+            )
+            self.assertIn("EXPECTED CUSTOM extras/eddy_z_acquire.py:", out)
+            self.assertIn("0 DRIFT", out)
+            self.assertIn(
+                "Result: production safety profile accepted", out
+            )
+
+    def test_verify_production_returns_nonzero_on_safety_drift(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            # Build a normally activated installation first.
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+            pairs = ",".join(
+                "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+                for i in range(60)
+            )
+            pending = root / "pending.json"
+            pending.write_text(json.dumps({
+                "probe_eddy_current btt_eddy": {
+                    "reg_drive_current": "16",
+                    "calibrate": pairs,
+                }
+            }))
+            self.run_helper(
+                root, "persist", "--pending-json", str(pending)
+            )
+            self.run_helper(root, "activate")
+
+            sensorless = (
+                root / "usr/data/printer_data/config/sensorless.cfg"
+            )
+            text = sensorless.read_text().replace(
+                "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
+                "EDDY_HOME_STATUS SAMPLES=25 TIMEOUT=2",
+            )
+            sensorless.write_text(text)
+
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--root", str(root),
+                    "verify-production",
+                ],
+                cwd=REPO, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 3)
+            self.assertIn("DRIFT           sensorless.cfg:", proc.stdout)
+            self.assertIn("Result: REVIEW REQUIRED", proc.stdout)
+
     def test_complete_staged_flow_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
