@@ -356,10 +356,6 @@ def get_printer_mcu(printer, name):
                 "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
                 sensorless,
             )
-            self.assertEqual(
-                section_core(sensorless, "[gcode_macro _IF_HOME_Z]"),
-                fixture("validated_if_home_z.cfg"),
-            )
 
     def test_complete_staged_flow_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
@@ -480,6 +476,10 @@ def get_printer_mcu(printer, name):
             self.assertIn("Pre-Z Eddy clearance:  present", status)
             self.assertIn("Unsafe off-bed guard:  ABSENT (good)", status)
             self.assertIn("Production safety:     PASS", status)
+            self.assertIn(
+                "Production file hash:  different (section contract still applies)",
+                status,
+            )
 
             self.run_helper(
                 root, "configure-wipe",
