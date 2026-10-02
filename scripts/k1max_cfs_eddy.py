@@ -20,6 +20,94 @@ SUPPORTED_FW = "2.3.5.33"
 MARKER = "# K1MAX_CFS_EDDY_HELPER"
 WIPE_MARKER = "# K1MAX_CFS_EDDY_WIPE_CONFIGURED=1"
 
+# Exact safety sections recovered from the corrected production validation.
+# These intentionally preserve Creality comments/structure around the Eddy edits.
+VALIDATED_IF_HOME_Z = """[gcode_macro _IF_HOME_Z]
+gcode:
+  {% if printer['gcode_macro xyz_ready'].z_ready|int == 1 %}
+    {% if printer.toolhead.position.z|int < 5 %}
+      {% set z_park = 5.0 - printer.toolhead.position.z|int %}
+      G91
+      G1 z{z_park} F600
+      G90
+    {% endif %}
+  {% else %}
+    {% if printer['gcode_macro xyz_ready'].z_moved|int == 0 %}
+      # BTT Eddy / cold-start safety:
+      # XY may be unknown here, so the Eddy probe may be hanging
+      # outside the bed and cannot be trusted as a clearance sensor.
+      # Use Creality's original bounded Z-away move before XY homing.
+      {% if printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
+        FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10
+      {% else %}
+        FORCE_MOVE STEPPER=stepper_z DISTANCE=0.1 VELOCITY=10
+      {% endif %}
+      SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_moved VALUE=1
+    {% endif %}
+  {% endif %}"""
+
+VALIDATED_HOME_Z = """[gcode_macro _HOME_Z]
+gcode:
+  {% if printer['gcode_macro xyz_ready'].y_ready|int == 1 %}
+    {% if printer['gcode_macro xyz_ready'].x_ready|int == 1 %}
+      _IF_HOME_Z
+    {% endif %}
+  {% endif %}
+  # Preserve Creality's high-Z recovery for non-Eddy probes.
+  # With Eddy, do not blindly move the bed 8mm toward the nozzle
+  # based on persisted z_pos.  Once XY is centered, live Eddy
+  # feedback and native probe homing establish the real Z position.
+  {% if 'probe_eddy_current btt_eddy' not in printer.configfile.settings
+        and printer.print_stats.z_pos|float >= 260.0 %}
+    FORCE_MOVE STEPPER=stepper_z DISTANCE=-8 VELOCITY=10
+  {% endif %}
+
+  {% set POSITION_X = printer.configfile.settings['stepper_x'].position_max/2 %}
+  {% set POSITION_Y = printer.configfile.settings['stepper_y'].position_max/2 %}
+  # BED_MESH_SET_DISABLE
+  G91
+  {% set x_park = POSITION_X - printer.toolhead.position.x|int %}
+  {% set y_park = POSITION_Y - printer.toolhead.position.y|int %}
+  {action_respond_info("x_park = %s \\n" % (x_park))}
+  {action_respond_info("y_park = %s \\n" % (y_park))}
+  G1 x{x_park} y{y_park} F3600
+  G90
+
+  # BTT Eddy:
+  # G1 queues motion asynchronously.  Wait until the carriage has
+  # actually reached the final Z-homing XY position before sampling
+  # Eddy, otherwise bed-height variation during XY travel can look
+  # like unexpected Z movement.
+  M400
+  G4 P500
+
+  # BTT Eddy:
+  # Ensure the probe begins native Z homing on the clear side
+  # of its configured frequency threshold.
+  {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
+    EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000
+  {% endif %}
+
+  G28 Z
+  SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_ready VALUE=1
+  # BED_MESH_SET_ENABLE"""
+
+VALIDATED_PRE_XY_BLOCK = """  {% if x_axes is not defined or x_axes[2] is not defined %}
+    BED_MESH_CLEAR
+
+    # BTT Eddy connectivity check ONLY.
+    # XY is not yet known, so the probe may be off-bed.
+    # Do not interpret CLEAR_SIDE here as physical nozzle clearance.
+    # This command performs no intentional motion and prevents homing
+    # from continuing if the Eddy MCU/sensor is unavailable.
+    {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
+      {action_respond_info("Checking BTT Eddy connectivity before homing; clearance is NOT evaluated until XY is known\\n")}
+      EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2
+    {% endif %}
+  {% endif %}
+
+"""
+
 
 class Stop(RuntimeError):
     pass
@@ -516,29 +604,7 @@ def patch_stage_sensorless(path):
     header = "[gcode_macro _IF_HOME_Z]"
     if header not in text:
         raise Stop("Cannot find _IF_HOME_Z in sensorless.cfg")
-    section = """[gcode_macro _IF_HOME_Z]
-gcode:
-  {% if printer['gcode_macro xyz_ready'].z_ready|int == 1 %}
-    {% if printer.toolhead.position.z|int < 5 %}
-      {% set z_park = 5.0 - printer.toolhead.position.z|int %}
-      G91
-      G1 z{z_park} F600
-      G90
-    {% endif %}
-  {% else %}
-    {% if printer['gcode_macro xyz_ready'].z_moved|int == 0 %}
-      # BTT Eddy / cold-start safety:
-      # XY may be unknown here, so the Eddy probe may be hanging
-      # outside the bed and cannot be trusted as a clearance sensor.
-      # Use Creality's original bounded Z-away move before XY homing.
-      {% if printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
-        FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10
-      {% else %}
-        FORCE_MOVE STEPPER=stepper_z DISTANCE=0.1 VELOCITY=10
-      {% endif %}
-      SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_moved VALUE=1
-    {% endif %}
-  {% endif %}"""
+    section = VALIDATED_IF_HOME_Z
     atomic_write(path, replace_section(text, header, section))
 
 
@@ -748,21 +814,7 @@ def patch_homing_override_safety(text):
             "Expected unknown-Z block in [homing_override] was not found."
         )
 
-    safe = """  {% if x_axes is not defined or x_axes[2] is not defined %}
-    BED_MESH_CLEAR
-
-    # BTT Eddy connectivity check ONLY.
-    # XY is not yet known, so the probe may be off-bed.
-    # Do not interpret CLEAR_SIDE here as physical nozzle clearance.
-    # This command performs no intentional motion and prevents homing
-    # from continuing if the Eddy MCU/sensor is unavailable.
-    {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
-      {action_respond_info("Checking BTT Eddy connectivity before homing; clearance is NOT evaluated until XY is known\\n")}
-      EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2
-    {% endif %}
-  {% endif %}
-
-"""
+    safe = VALIDATED_PRE_XY_BLOCK
     new_block = block[:a] + safe + block[b:]
     return "".join(lines[:start]) + new_block + "".join(lines[end:])
 
@@ -772,66 +824,8 @@ def patch_native_homing(sensorless):
     if "[gcode_macro _IF_HOME_Z]" not in text or "[gcode_macro _HOME_Z]" not in text:
         raise Stop("Expected K1 Max sensorless macros not found")
 
-    guard = """[gcode_macro _IF_HOME_Z]
-gcode:
-  {% if printer['gcode_macro xyz_ready'].z_ready|int == 1 %}
-    {% if printer.toolhead.position.z|int < 5 %}
-      {% set z_park = 5.0 - printer.toolhead.position.z|int %}
-      G91
-      G1 z{z_park} F600
-      G90
-    {% endif %}
-  {% else %}
-    {% if printer['gcode_macro xyz_ready'].z_moved|int == 0 %}
-      # BTT Eddy / cold-start safety:
-      # XY may be unknown here, so the Eddy probe may be hanging
-      # outside the bed and cannot be trusted as a clearance sensor.
-      # Use Creality's original bounded Z-away move before XY homing.
-      {% if printer.print_stats.z_pos|float <= 20.0 or printer.print_stats.power_loss == 1 %}
-        FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10
-      {% else %}
-        FORCE_MOVE STEPPER=stepper_z DISTANCE=0.1 VELOCITY=10
-      {% endif %}
-      SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_moved VALUE=1
-    {% endif %}
-  {% endif %}"""
-
-    homez = """[gcode_macro _HOME_Z]
-gcode:
-  {% if printer['gcode_macro xyz_ready'].y_ready|int == 1 %}
-    {% if printer['gcode_macro xyz_ready'].x_ready|int == 1 %}
-      _IF_HOME_Z
-    {% endif %}
-  {% endif %}
-  # Preserve Creality's high-Z recovery for non-Eddy probes.
-  # With Eddy, do not blindly move the bed 8mm toward the nozzle
-  # based on persisted z_pos. Once XY is centered, live Eddy
-  # feedback and native probe homing establish the real Z position.
-  {% if 'probe_eddy_current btt_eddy' not in printer.configfile.settings
-        and printer.print_stats.z_pos|float >= 260.0 %}
-    FORCE_MOVE STEPPER=stepper_z DISTANCE=-8 VELOCITY=10
-  {% endif %}
-
-  {% set POSITION_X = printer.configfile.settings['stepper_x'].position_max/2 %}
-  {% set POSITION_Y = printer.configfile.settings['stepper_y'].position_max/2 %}
-  G91
-  {% set x_park = POSITION_X - printer.toolhead.position.x|int %}
-  {% set y_park = POSITION_Y - printer.toolhead.position.y|int %}
-  {action_respond_info("x_park = %s \\n" % (x_park))}
-  {action_respond_info("y_park = %s \\n" % (y_park))}
-  G1 x{x_park} y{y_park} F3600
-  G90
-
-  # Wait until XY is physically centered before trusting Eddy clearance.
-  M400
-  G4 P500
-
-  {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
-    EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000
-  {% endif %}
-
-  G28 Z
-  SET_GCODE_VARIABLE MACRO=xyz_ready VARIABLE=z_ready VALUE=1"""
+    guard = VALIDATED_IF_HOME_Z
+    homez = VALIDATED_HOME_Z
 
     text = replace_section(text, "[gcode_macro _IF_HOME_Z]", guard)
     text = replace_section(text, "[gcode_macro _HOME_Z]", homez)
