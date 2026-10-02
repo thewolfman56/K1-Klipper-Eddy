@@ -87,7 +87,7 @@ Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an erro
 | `persist` | Save only pending Eddy calibration values into `btteddy_mcu.cfg` |
 | `activate` | Enable native Eddy Z and the validated homing/CFS safety routing |
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
-| `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards and wipe state |
+| `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
 | `rollback <dir>` | Restore a helper-created backup |
 
 ## Important boundaries
