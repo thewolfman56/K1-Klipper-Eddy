@@ -331,12 +331,18 @@ def get_printer_mcu(printer, name):
             root = Path(td)
             self.make_root(root)
 
+            sensorless_path = (
+                root / "usr/data/printer_data/config/sensorless.cfg"
+            )
+            before = sensorless_path.read_text()
+
             self.run_helper(
                 root, "stage", "--x-offset", "-23", "--y-offset", "0"
             )
-            sensorless = (
-                root / "usr/data/printer_data/config/sensorless.cfg"
-            ).read_text()
+            sensorless = sensorless_path.read_text()
+
+            # Calibration staging must not rewrite Creality's homing file.
+            self.assertEqual(before, sensorless)
 
             self.assertIn(
                 'FORCE_MOVE STEPPER=stepper_z DISTANCE={printer["gcode_macro PRINTER_PARAM"].z_safe_g28} VELOCITY=10',
