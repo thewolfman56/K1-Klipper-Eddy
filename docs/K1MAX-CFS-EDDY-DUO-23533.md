@@ -144,6 +144,7 @@ Check:
 
 ```sh
 sh install.sh status
+sh install.sh verify-production
 ```
 
 The drive-current line should now be present.
