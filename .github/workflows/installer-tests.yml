@@ -16,5 +16,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/k1max_cfs_eddy.py
           python3 -m py_compile klippy/extras/eddy_z_acquire.py
+      - name: Verify production Eddy source hashes
+        run: sha256sum -c tests/fixtures/validated_deployed_source_sha256.txt
       - name: Synthetic 2.3.5.33 install / activate / rollback
         run: python3 -m unittest -v tests.test_installer
