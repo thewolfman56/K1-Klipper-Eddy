@@ -85,6 +85,20 @@ sh install.sh verify-production
 
 `EXACT` means the file SHA256 matches the final reference snapshot. `EXPECTED CUSTOM` means bytes differ for an allowed printer-specific reason (for example USB serial, calibration curve, includes, or measured napkin coordinates) while the required safety structure still validates. `DRIFT` means a required file is missing or its validated safety/compatibility contract no longer matches.
 
+Before any future Creality firmware update, create a separate update baseline:
+
+```sh
+sh install.sh pre-update-snapshot
+```
+
+After the firmware update and reboot, **do not immediately restore old files**. Audit the new firmware first:
+
+```sh
+sh install.sh audit-after-update <snapshot-directory>
+```
+
+The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and rechecks the production homing safety contract. It performs no repair and can be run even when the new firmware is no longer `2.3.5.33`.
+
 ## Commands
 
 | Command | Purpose |
@@ -97,6 +111,8 @@ sh install.sh verify-production
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
 | `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
 | `verify-production` | Read-only comparison against the final production snapshot; reports `EXACT`, `EXPECTED CUSTOM`, or `DRIFT` and exits nonzero on drift |
+| `pre-update-snapshot` | Verify the working installation, then preserve the full printer config and update-sensitive Klipper/service files before a firmware update |
+| `audit-after-update <snapshot>` | Read-only post-update comparison showing exactly which captured files were changed, removed, or added; performs no repair |
 | `rollback <dir>` | Restore a helper-created backup |
 
 ## Important boundaries
@@ -105,7 +121,7 @@ sh install.sh verify-production
 - **Do not use Eddy `CLEAR_SIDE` as proof of physical clearance while XY is unknown.** The probe may be hanging off the bed; the validated cold-start path uses a connectivity-only Eddy check plus Creality's bounded Z-away move until XY is centered.
 - Do not run `activate` before drive-current and height-map calibration are persisted.
 - Do not use this branch as proof of compatibility with `2.3.5.34`, `2.3.5.35`, the newer `1.1.x` K1 Max firmware line, or a different motherboard/CFS-C conversion.
-- Creality firmware updates can overwrite patched Klipper files. Run `doctor`/`status` after any firmware change; this release should be treated as a `2.3.5.33` target only.
+- Creality firmware updates can overwrite patched Klipper files. Create a `pre-update-snapshot` first, then use `audit-after-update` after reboot. **Do not blindly restore `.33` Klipper files onto a newer firmware.** This release should be treated as a `2.3.5.33` target only.
 - The original upstream installer is retained as `legacy-install.sh` for reference and is **not** the recommended installation method for this fork.
 
 See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior and regression state this helper was derived from.
