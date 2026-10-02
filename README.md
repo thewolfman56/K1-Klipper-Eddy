@@ -137,6 +137,16 @@ See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior 
 
 Before merging/tagging a release, use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for the live-printer, CI, recovery, documentation, and physical-motion release gates.
 
+A Git-free install archive can be built reproducibly with:
+
+```sh
+python3 scripts/build_release.py \
+  --version v1.0.0 \
+  --output dist/K1-Klipper-Eddy-v1.0.0.zip
+```
+
+The ZIP contains the installer, required Klipper compatibility files, configuration templates, license, and user documentation. It intentionally excludes Git metadata, CI files, tests, caches, and Python bytecode. A `RELEASE-MANIFEST.json` inside the archive records the target firmware, production reference, entrypoint, version, and source commit when available.
+
 
 ## Reference documentation
 
