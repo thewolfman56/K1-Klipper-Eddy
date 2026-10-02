@@ -151,6 +151,7 @@ sh install.sh pre-update-snapshot
 - [ ] Snapshot records the relevant Klipper/service paths.
 - [ ] Rollback has already passed the synthetic CI test.
 - [ ] Documentation clearly says **not** to restore old `.33` Klipper files blindly onto future firmware.
+- [ ] `docs/RELEASE-NOTES-v1.0.0.md` matches the final supported profile and known limitations.
 
 ## 9. Documentation gate
 
