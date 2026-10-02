@@ -20,6 +20,7 @@ import urllib.request
 SUPPORTED_FW = "2.3.5.33"
 MARKER = "# K1MAX_CFS_EDDY_HELPER"
 WIPE_MARKER = "# K1MAX_CFS_EDDY_WIPE_CONFIGURED=1"
+PRODUCTION_SENSORLESS_SHA256 = "548fdaa7d19a0eaf5a943febe416bde97dd736987ecf7e2991a5bd61b0caa12c"
 
 # Exact safety sections recovered from the corrected production validation.
 # These intentionally preserve Creality comments/structure around the Eddy edits.
@@ -833,17 +834,31 @@ def sensorless_contract(text):
 
 
 def patch_stage_sensorless(path):
-    """Keep Creality's bounded unknown-Z move while Eddy is staged.
+    """Validate the bounded unknown-Z path without rewriting sensorless.cfg.
 
-    Eddy may be physically off-bed before XY is homed, so it must not be used
-    as a clearance sensor at this point.
+    During calibration staging TMC/Creality still owns Z.  The stock .33
+    bounded unknown-Z-away move is the desired behavior.  Rewriting the whole
+    macro here would create unnecessary drift before native Eddy activation.
     """
     text = read_text(path)
-    header = "[gcode_macro _IF_HOME_Z]"
-    if header not in text:
+    block = section_core(text, "[gcode_macro _IF_HOME_Z]")
+    if block is None:
         raise Stop("Cannot find _IF_HOME_Z in sensorless.cfg")
-    section = VALIDATED_IF_HOME_Z
-    atomic_write(path, replace_section(text, header, section))
+    if "FORCE_MOVE STEPPER=stepper_z DISTANCE=" not in block:
+        raise Stop(
+            "_IF_HOME_Z does not contain the expected bounded Z-away move; "
+            "refusing to stage Eddy on an unknown homing layout."
+        )
+    if "z_safe_g28} VELOCITY=10" not in block:
+        raise Stop(
+            "_IF_HOME_Z does not contain Creality's z_safe_g28 path; "
+            "refusing to rewrite an unknown homing layout."
+        )
+    if "EDDY_PREHOME_CLEAR MARGIN=1.000 MAX_TRAVEL=5.000" in text:
+        raise Stop(
+            "Unsafe legacy off-bed Eddy clearance block detected. "
+            "Remove/rollback it before staging."
+        )
 
 
 def stage(args):
@@ -1221,6 +1236,15 @@ def status(args):
     contract = sensorless_contract(sensorless)
     contract_ok = all(contract.values())
     print("Production safety:     %s" % ("PASS" if contract_ok else "DRIFT - REVIEW"))
+    sensorless_hash = sha256_file(p["sensorless"]) if p["sensorless"].exists() else None
+    print(
+        "Production file hash:  %s"
+        % (
+            "EXACT MATCH"
+            if sensorless_hash == PRODUCTION_SENSORLESS_SHA256
+            else ("different (section contract still applies)" if sensorless_hash else "missing")
+        )
+    )
     if not contract_ok:
         print(
             "  contract details: %s"
