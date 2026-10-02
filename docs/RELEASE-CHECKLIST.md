@@ -18,6 +18,10 @@ A green GitHub Actions run is necessary but not sufficient. The physical-printer
 - [ ] Firmware-update snapshot/audit tests pass.
 - [ ] Release-readiness accepted/failure tests pass.
 - [ ] No unexpected generated files, bytecode, or caches are committed.
+- [ ] Release ZIP builder test passes.
+- [ ] Two builds from the same source/version are byte-identical.
+- [ ] Release ZIP excludes `.git`, `.github`, tests, `__pycache__`, and `.pyc` files.
+- [ ] Release ZIP contains `RELEASE-MANIFEST.json`.
 
 ## 2. Live printer release-readiness gate
 
@@ -175,9 +179,17 @@ git tag -a v1.0.0 -m "K1 Max + CFS + BTT Eddy Duo — CrealityOS 2.3.5.33"
 git push origin v1.0.0
 ```
 
-4. Create the GitHub release from `v1.0.0`.
-5. Attach a source ZIP for printers where Git is unavailable or intentionally not installed.
-6. State prominently in the release notes that **v1.0.0 is validated only for CrealityOS 2.3.5.33**.
-7. Keep the production snapshot/checksums and safety limitations in the release notes.
+4. Build the deterministic printer-install ZIP:
+
+```sh
+python3 scripts/build_release.py \
+  --version v1.0.0 \
+  --output dist/K1-Klipper-Eddy-v1.0.0.zip
+```
+
+5. Create the GitHub release from `v1.0.0`.
+6. Attach `dist/K1-Klipper-Eddy-v1.0.0.zip` for printers where Git is unavailable or intentionally not installed.
+7. State prominently in the release notes that **v1.0.0 is validated only for CrealityOS 2.3.5.33**.
+8. Keep the production snapshot/checksums and safety limitations in the release notes.
 
 Do not mark a later Creality firmware as supported until its changed Klipper/CFS files have gone through the same audit and physical regression process.
