@@ -77,6 +77,14 @@ sh install.sh configure-wipe \
 
 Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an error instead of guessing a wipe height.
 
+After activation and wipe configuration, the live printer can be checked against the final reference without changing anything:
+
+```sh
+sh install.sh verify-production
+```
+
+`EXACT` means the file SHA256 matches the final reference snapshot. `EXPECTED CUSTOM` means bytes differ for an allowed printer-specific reason (for example USB serial, calibration curve, includes, or measured napkin coordinates) while the required safety structure still validates. `DRIFT` means a required file is missing or its validated safety/compatibility contract no longer matches.
+
 ## Commands
 
 | Command | Purpose |
@@ -88,6 +96,7 @@ Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an erro
 | `activate` | Enable native Eddy Z and the validated homing/CFS safety routing |
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
 | `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
+| `verify-production` | Read-only comparison against the final production snapshot; reports `EXACT`, `EXPECTED CUSTOM`, or `DRIFT` and exits nonzero on drift |
 | `rollback <dir>` | Restore a helper-created backup |
 
 ## Important boundaries
