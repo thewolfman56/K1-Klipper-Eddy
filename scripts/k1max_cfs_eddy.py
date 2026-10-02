@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import urllib.request
 
@@ -1528,6 +1529,251 @@ def audit_after_update(args):
     return 0
 
 
+
+def release_readiness(args):
+    """Read-only release-candidate audit for the validated 2.3.5.33 build."""
+    p = printer_paths(args.root)
+    checks = []
+
+    def add(level, name, message):
+        checks.append((level, name, message))
+
+    # Platform / required files.
+    fw, _ = detect_firmware(args.root)
+    if fw == SUPPORTED_FW:
+        add("PASS", "Firmware", SUPPORTED_FW)
+    else:
+        add(
+            "FAIL", "Firmware",
+            "expected %s, detected %s" % (SUPPORTED_FW, fw or "unknown"),
+        )
+
+    for label, key in (
+        ("printer.cfg", "printer"),
+        ("sensorless.cfg", "sensorless"),
+        ("gcode_macro.cfg", "gcode_macro"),
+        ("CFS box.cfg", "box"),
+    ):
+        add(
+            "PASS" if p[key].exists() else "FAIL",
+            label,
+            "present" if p[key].exists() else "missing",
+        )
+
+    serial = detect_eddy_serial(args.root)
+    add(
+        "PASS" if serial else "FAIL",
+        "Eddy USB",
+        serial or "not uniquely detected",
+    )
+
+    # Calibration / native-Z / wipe state.
+    reg, points = calibration_state(p["eddy_cfg"])
+    add(
+        "PASS" if reg is not None else "FAIL",
+        "Eddy drive current",
+        reg or "missing",
+    )
+    add(
+        "PASS" if points >= 50 else "FAIL",
+        "Eddy height map",
+        "%d points" % points,
+    )
+
+    printer = read_text(p["printer"])
+    native = bool(
+        re.search(
+            r"(?m)^\s*endstop_pin:\s*probe:z_virtual_endstop\s*$",
+            printer,
+        )
+    )
+    add(
+        "PASS" if native else "FAIL",
+        "Native Eddy Z",
+        "active" if native else "not active",
+    )
+
+    wipe = read_text(p["eddy_macros"])
+    wipe_ok = (
+        WIPE_MARKER in wipe
+        and "[gcode_macro NOZZLE_CLEAR]" in wipe
+        and "[gcode_macro CHECK_BED_MESH]" in wipe
+    )
+    add(
+        "PASS" if wipe_ok else "FAIL",
+        "CFS napkin wipe",
+        "configured" if wipe_ok else "not configured / incomplete",
+    )
+
+    # Exact recovered homing-safety contract.
+    sensorless = read_text(p["sensorless"])
+    contract = sensorless_contract(sensorless) if sensorless else {}
+    if contract and all(contract.values()):
+        add("PASS", "Production homing safety", "exact recovered sections match")
+    else:
+        details = ", ".join(
+            "%s=%s" % (name, "ok" if ok else "DRIFT")
+            for name, ok in contract.items()
+        ) or "sensorless.cfg unavailable"
+        add("FAIL", "Production homing safety", details)
+
+    if "MARGIN=1.000 MAX_TRAVEL=5.000" in sensorless:
+        add(
+            "FAIL", "Legacy off-bed guard",
+            "unsafe superseded pre-XY Eddy clearance block is present",
+        )
+    else:
+        add("PASS", "Legacy off-bed guard", "absent")
+
+    # Compatibility source integrity.
+    exact_sources = (
+        "extras/upgrade/ldc1612.py",
+        "extras/upgrade/probe_eddy_current.py",
+        "extras/upgrade/bulk_sensor.py",
+    )
+    for rel in exact_sources:
+        path = p["klippy"] / rel
+        expected = PRODUCTION_SHA256["klippy/" + rel]
+        if not path.exists():
+            add("FAIL", rel, "missing")
+        else:
+            actual = sha256_file(path)
+            add(
+                "PASS" if actual == expected else "FAIL",
+                rel,
+                "exact production SHA256"
+                if actual == expected
+                else "SHA256 drift: %s" % actual,
+            )
+
+    helper = p["klippy"] / "extras/eddy_z_acquire.py"
+    if not helper.exists():
+        add("FAIL", "eddy_z_acquire.py", "missing")
+    else:
+        helper_text = read_text(helper)
+        helper_ok = (
+            "EDDY_HOME_STATUS" in helper_text
+            and "EDDY_PREHOME_CLEAR" in helper_text
+            and "force_move.manual_move" in helper_text
+            and "move_distance = min(step, remaining)" in helper_text
+            and "if freq_change > 40.0:" in helper_text
+            and "total_moved >= 0.075" in helper_text
+        )
+        if sha256_file(helper) == PRODUCTION_SHA256["klippy/extras/eddy_z_acquire.py"]:
+            add("PASS", "eddy_z_acquire.py", "exact production SHA256")
+        elif helper_ok:
+            add(
+                "WARN", "eddy_z_acquire.py",
+                "production bytes differ; required bounded/fail-stop safety contract is present",
+            )
+        else:
+            add(
+                "FAIL", "eddy_z_acquire.py",
+                "bytes differ and required safety contract does not validate",
+            )
+
+    # Optional add-ons: only installed risky states count as warnings.
+    addon_findings = addon_audit(args.root)
+    addon_warnings = [
+        (name, message)
+        for level, name, message in addon_findings
+        if level == "WARN"
+    ]
+    if addon_warnings:
+        for name, message in addon_warnings:
+            add("WARN", "Optional: " + name, message)
+    else:
+        add("PASS", "Optional add-ons", "no risky validated-addon state detected")
+
+    # Update-snapshot readiness. Do not create anything here.
+    snapshot_parent = p["update_snapshots"]
+    writable_parent = snapshot_parent if snapshot_parent.exists() else snapshot_parent.parent
+    if writable_parent.exists() and os.access(str(writable_parent), os.W_OK):
+        add(
+            "PASS", "Firmware-update snapshot",
+            "snapshot location is available/writable",
+        )
+    else:
+        add(
+            "WARN", "Firmware-update snapshot",
+            "snapshot location parent is not currently writable",
+        )
+
+    # Repository/source integrity. ZIP installs are allowed; a dirty Git
+    # working tree is a warning rather than a printer-safety failure.
+    rr = repo_root()
+    required_repo_files = (
+        rr / "install.sh",
+        rr / "scripts/k1max_cfs_eddy.py",
+        rr / "LICENSE",
+        rr / "klippy/extras/eddy_z_acquire.py",
+        rr / "tests/fixtures/validated_if_home_z.cfg",
+        rr / "tests/fixtures/validated_home_z.cfg",
+        rr / "tests/fixtures/validated_pre_xy_block.txt",
+        rr / "tests/fixtures/validated_deployed_source_sha256.txt",
+    )
+    missing_repo = [str(x.relative_to(rr)) for x in required_repo_files if not x.exists()]
+    if missing_repo:
+        add(
+            "FAIL", "Repository files",
+            "missing: %s" % ", ".join(missing_repo),
+        )
+    else:
+        add("PASS", "Repository files", "required release files are present")
+
+    git_dir = rr / ".git"
+    if git_dir.exists():
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(rr), "status", "--porcelain"],
+                text=True, capture_output=True, timeout=5,
+            )
+            if proc.returncode == 0:
+                dirty = [line for line in proc.stdout.splitlines() if line.strip()]
+                if dirty:
+                    add(
+                        "WARN", "Git working tree",
+                        "%d uncommitted path(s)" % len(dirty),
+                    )
+                else:
+                    add("PASS", "Git working tree", "clean")
+            else:
+                add(
+                    "WARN", "Git working tree",
+                    "git status failed: %s" % (proc.stderr.strip() or proc.returncode),
+                )
+        except Exception as exc:
+            add("WARN", "Git working tree", "unable to inspect: %s" % exc)
+    else:
+        add("INFO", "Git working tree", "not a Git checkout (ZIP/USB install is allowed)")
+
+    # Report.
+    print("\nK1 Max + CFS + BTT Eddy release-readiness")
+    print("Target: CrealityOS %s" % SUPPORTED_FW)
+    print("Read-only: no files, services, G-code, or printer motion were changed.\n")
+    for level, name, message in checks:
+        print("%-5s %-34s %s" % (level, name + ":", message))
+
+    passes = sum(1 for level, _, _ in checks if level == "PASS")
+    infos = sum(1 for level, _, _ in checks if level == "INFO")
+    warns = sum(1 for level, _, _ in checks if level == "WARN")
+    fails = sum(1 for level, _, _ in checks if level == "FAIL")
+
+    print(
+        "\nSummary: %d PASS, %d WARN, %d INFO, %d FAIL"
+        % (passes, warns, infos, fails)
+    )
+
+    if fails:
+        print("Release readiness: NOT READY")
+        return 5
+    if warns:
+        print("Release readiness: READY WITH WARNINGS")
+        return 0
+    print("Release readiness: READY")
+    return 0
+
+
 def verify_production(args):
     """Read-only comparison against the corrected production reference."""
     p = printer_paths(args.root)
@@ -1738,6 +1984,7 @@ def build_parser():
     sub.add_parser("backup")
     sub.add_parser("status")
     sub.add_parser("verify-production")
+    sub.add_parser("release-readiness")
 
     pre = sub.add_parser("pre-update-snapshot")
     pre.add_argument("--allow-drift", action="store_true")
@@ -1795,6 +2042,8 @@ def main():
             status(args)
         elif args.command == "verify-production":
             return verify_production(args)
+        elif args.command == "release-readiness":
+            return release_readiness(args)
         elif args.command == "pre-update-snapshot":
             return pre_update_snapshot(args)
         elif args.command == "audit-after-update":
