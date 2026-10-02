@@ -437,6 +437,7 @@ gcode:
             self.assertIn("Bounded unknown-Z move: present", status)
             self.assertIn("Pre-Z Eddy clearance:  present", status)
             self.assertIn("Unsafe off-bed guard:  ABSENT (good)", status)
+            self.assertIn("Production safety:     PASS", status)
 
             self.run_helper(
                 root, "configure-wipe",
