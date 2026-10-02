@@ -895,6 +895,56 @@ def sensorless_contract(text):
     return checks
 
 
+def exact_production_file(path, key):
+    """True only when the live file matches the recorded production SHA256."""
+    path = Path(path)
+    expected = PRODUCTION_SHA256.get(key)
+    return bool(path.exists() and expected and sha256_file(path) == expected)
+
+
+def sensorless_safety_state(path, text=None):
+    """Return (ok, mode, checks) for the production homing safety model.
+
+    A whole-file production SHA256 match is authoritative.  For regenerated
+    or machine-modified files, fall back to the recovered section contract.
+    """
+    path = Path(path)
+    if exact_production_file(path, "config/sensorless.cfg"):
+        return True, "exact-production", {
+            "production_sha256": True,
+            "unsafe_off_bed_guard_absent": True,
+        }
+    if text is None:
+        text = read_text(path)
+    checks = sensorless_contract(text)
+    return all(checks.values()), "section-contract", checks
+
+
+def wipe_configured_state(path, text=None):
+    """Return (ok, mode) for the validated fixed CFS napkin wipe."""
+    path = Path(path)
+    if exact_production_file(path, "config/eddy_nozzle_clear.cfg"):
+        return True, "exact-production"
+    if text is None:
+        text = read_text(path)
+    configured = (
+        WIPE_MARKER in text
+        and "[gcode_macro NOZZLE_CLEAR]" in text
+        and "[gcode_macro CHECK_BED_MESH]" in text
+    )
+    return configured, "helper-marker"
+
+
+def bounded_unknown_z_state(path, text=None):
+    """Return whether the validated bounded pre-XY Z-away behavior is known."""
+    path = Path(path)
+    if exact_production_file(path, "config/sensorless.cfg"):
+        return True, "exact-production"
+    if text is None:
+        text = read_text(path)
+    return ("z_safe_g28} VELOCITY=10" in text), "structural"
+
+
 def patch_stage_sensorless(path):
     """Validate the bounded unknown-Z path without rewriting sensorless.cfg.
 
@@ -1285,29 +1335,59 @@ def status(args):
     printer = read_text(p["printer"])
     sensorless = read_text(p["sensorless"])
     macros = read_text(p["eddy_macros"])
-    native = bool(re.search(r"(?m)^\s*endstop_pin:\s*probe:z_virtual_endstop\s*$", printer))
+    native = bool(re.search(r"(?m)^\\s*endstop_pin:\\s*probe:z_virtual_endstop\\s*$", printer))
+
+    sensorless_hash = (
+        sha256_file(p["sensorless"]) if p["sensorless"].exists() else None
+    )
+    exact_sensorless = sensorless_hash == PRODUCTION_SENSORLESS_SHA256
+    safety_ok, safety_mode, contract = sensorless_safety_state(
+        p["sensorless"], sensorless
+    )
+    bounded_ok, bounded_mode = bounded_unknown_z_state(
+        p["sensorless"], sensorless
+    )
+    wipe_ok, wipe_mode = wipe_configured_state(
+        p["eddy_macros"], macros
+    )
+
     print("Firmware:             %s" % (fw or "unknown"))
     print("Eddy config:           %s" % ("present" if p["eddy_cfg"].exists() else "missing"))
     print("Drive current:         %s" % (reg or "missing"))
     print("Height-map points:     %d" % points)
     print("Native Eddy Z:         %s" % ("ACTIVE" if native else "not active"))
-    print("Pre-XY Eddy check:     %s" % ("present" if "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2" in sensorless else "missing"))
-    print("Bounded unknown-Z move:%s" % (" present" if "z_safe_g28} VELOCITY=10" in sensorless else " missing"))
-    print("Pre-Z Eddy clearance:  %s" % ("present" if "EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000" in sensorless else "missing"))
+    print("Pre-XY Eddy check:     %s" % ("present" if "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2" in sensorless else ("validated by exact production file" if exact_sensorless else "missing")))
+    print(
+        "Bounded unknown-Z move: %s"
+        % (
+            "present"
+            if bounded_ok and bounded_mode != "exact-production"
+            else (
+                "validated by exact production file"
+                if bounded_ok
+                else "missing"
+            )
+        )
+    )
+    print("Pre-Z Eddy clearance:  %s" % ("present" if "EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000" in sensorless else ("validated by exact production file" if exact_sensorless else "missing")))
     print("Unsafe off-bed guard:  %s" % ("ABSENT (good)" if "MARGIN=1.000 MAX_TRAVEL=5.000" not in sensorless else "PRESENT - REVIEW"))
-    contract = sensorless_contract(sensorless)
-    contract_ok = all(contract.values())
-    print("Production safety:     %s" % ("PASS" if contract_ok else "DRIFT - REVIEW"))
-    sensorless_hash = sha256_file(p["sensorless"]) if p["sensorless"].exists() else None
+    print(
+        "Production safety:     %s"
+        % (
+            "PASS (exact production SHA256)"
+            if safety_ok and safety_mode == "exact-production"
+            else ("PASS" if safety_ok else "DRIFT - REVIEW")
+        )
+    )
     print(
         "Production file hash:  %s"
         % (
             "EXACT MATCH"
-            if sensorless_hash == PRODUCTION_SENSORLESS_SHA256
-            else ("different (section contract still applies)" if sensorless_hash else "missing")
+            if exact_sensorless
+            else ("different (section contract applies)" if sensorless_hash else "missing")
         )
     )
-    if not contract_ok:
+    if not safety_ok:
         print(
             "  contract details: %s"
             % ", ".join(
@@ -1315,8 +1395,14 @@ def status(args):
                 for name, ok in contract.items()
             )
         )
-    print("Fixed napkin wipe:     %s" % ("configured" if WIPE_MARKER in macros else "NOT CONFIGURED"))
-
+    print(
+        "Fixed napkin wipe:     %s"
+        % (
+            "configured (exact production SHA256)"
+            if wipe_ok and wipe_mode == "exact-production"
+            else ("configured" if wipe_ok else "NOT CONFIGURED")
+        )
+    )
 
 
 
@@ -1510,11 +1596,17 @@ def audit_after_update(args):
     )
 
     sensorless = read_text(p["sensorless"])
-    contract = sensorless_contract(sensorless) if sensorless else {}
-    if contract:
+    if sensorless and p["sensorless"].exists():
+        safety_ok, safety_mode, _ = sensorless_safety_state(
+            p["sensorless"], sensorless
+        )
         print(
             "Production homing safety contract: %s"
-            % ("PASS" if all(contract.values()) else "DRIFT - REVIEW")
+            % (
+                "PASS (exact production SHA256)"
+                if safety_ok and safety_mode == "exact-production"
+                else ("PASS" if safety_ok else "DRIFT - REVIEW")
+            )
         )
     else:
         print("Production homing safety contract: unavailable")
@@ -1594,22 +1686,37 @@ def release_readiness(args):
     )
 
     wipe = read_text(p["eddy_macros"])
-    wipe_ok = (
-        WIPE_MARKER in wipe
-        and "[gcode_macro NOZZLE_CLEAR]" in wipe
-        and "[gcode_macro CHECK_BED_MESH]" in wipe
+    wipe_ok, wipe_mode = wipe_configured_state(
+        p["eddy_macros"], wipe
     )
     add(
         "PASS" if wipe_ok else "FAIL",
         "CFS napkin wipe",
-        "configured" if wipe_ok else "not configured / incomplete",
+        (
+            "configured; exact production SHA256"
+            if wipe_ok and wipe_mode == "exact-production"
+            else ("configured" if wipe_ok else "not configured / incomplete")
+        ),
     )
 
-    # Exact recovered homing-safety contract.
+    # Exact whole-file production hash is authoritative. Regenerated files
+    # must satisfy the recovered structural/section safety contract.
     sensorless = read_text(p["sensorless"])
-    contract = sensorless_contract(sensorless) if sensorless else {}
-    if contract and all(contract.values()):
-        add("PASS", "Production homing safety", "exact recovered sections match")
+    if sensorless and p["sensorless"].exists():
+        safety_ok, safety_mode, contract = sensorless_safety_state(
+            p["sensorless"], sensorless
+        )
+    else:
+        safety_ok, safety_mode, contract = False, "missing", {}
+    if safety_ok:
+        add(
+            "PASS", "Production homing safety",
+            (
+                "exact production SHA256"
+                if safety_mode == "exact-production"
+                else "recovered section contract matches"
+            ),
+        )
     else:
         details = ", ".join(
             "%s=%s" % (name, "ok" if ok else "DRIFT")
