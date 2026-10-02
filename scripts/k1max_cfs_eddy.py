@@ -594,6 +594,64 @@ def replace_section(text, header, new_section):
     return before + section + after.lstrip("\n")
 
 
+def section_core(text, header):
+    """Return one config section with only separator newlines normalized."""
+    lines = text.splitlines(True)
+    start = None
+    end = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip() == header:
+            start = i
+            break
+    if start is None:
+        return None
+    for i in range(start + 1, len(lines)):
+        s = lines[i].strip()
+        if s.startswith("[") and s.endswith("]"):
+            end = i
+            break
+    return "".join(lines[start:end]).rstrip("\n")
+
+
+def pre_xy_block(text):
+    block = section_core(text, "[homing_override]")
+    if block is None:
+        return None
+    first = "  {% if x_axes is not defined or x_axes[2] is not defined %}"
+    following = (
+        "  {% if x_axes is defined and x_axes[0] is defined "
+        "and x_axes[1] is defined %}"
+    )
+    a = block.find(first)
+    b = block.find(following, a + len(first))
+    if a < 0 or b < 0:
+        return None
+    return block[a:b]
+
+
+def sensorless_contract(text):
+    """Return exact recovered-production safety contract checks."""
+    checks = {
+        "_IF_HOME_Z": (
+            section_core(text, "[gcode_macro _IF_HOME_Z]")
+            == VALIDATED_IF_HOME_Z
+        ),
+        "_HOME_Z": (
+            section_core(text, "[gcode_macro _HOME_Z]")
+            == VALIDATED_HOME_Z
+        ),
+        "pre_xy": (
+            pre_xy_block(text)
+            == VALIDATED_PRE_XY_BLOCK
+        ),
+        "unsafe_off_bed_guard_absent": (
+            "EDDY_PREHOME_CLEAR MARGIN=1.000 MAX_TRAVEL=5.000"
+            not in text
+        ),
+    }
+    return checks
+
+
 def patch_stage_sensorless(path):
     """Keep Creality's bounded unknown-Z move while Eddy is staged.
 
@@ -980,6 +1038,17 @@ def status(args):
     print("Bounded unknown-Z move:%s" % (" present" if "z_safe_g28} VELOCITY=10" in sensorless else " missing"))
     print("Pre-Z Eddy clearance:  %s" % ("present" if "EDDY_PREHOME_CLEAR MAX_TRAVEL=2.000" in sensorless else "missing"))
     print("Unsafe off-bed guard:  %s" % ("ABSENT (good)" if "MARGIN=1.000 MAX_TRAVEL=5.000" not in sensorless else "PRESENT - REVIEW"))
+    contract = sensorless_contract(sensorless)
+    contract_ok = all(contract.values())
+    print("Production safety:     %s" % ("PASS" if contract_ok else "DRIFT - REVIEW"))
+    if not contract_ok:
+        print(
+            "  contract details: %s"
+            % ", ".join(
+                "%s=%s" % (name, "ok" if ok else "DRIFT")
+                for name, ok in contract.items()
+            )
+        )
     print("Fixed napkin wipe:     %s" % ("configured" if WIPE_MARKER in macros else "NOT CONFIGURED"))
 
 
