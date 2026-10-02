@@ -206,4 +206,28 @@ The production `eddy_z_acquire.py` checksum is known, but its complete productio
 
 The command exits with status 3 when any `DRIFT` item is found, making it suitable for scripted audits while still performing no writes or printer motion.
 
+## Firmware-update preservation model
+
+The public helper now includes an **audit-before-repair** workflow for future Creality firmware updates.
+
+Before updating:
+
+```sh
+sh install.sh pre-update-snapshot
+```
+
+This records the complete printer config plus the Klipper/core/service files that matter to the K1 Max + CFS + Eddy integration. It also records file SHA256 values, sizes, symlink targets and the starting firmware version.
+
+After updating:
+
+```sh
+sh install.sh audit-after-update <snapshot>
+```
+
+The audit can run even when the printer is no longer on 2.3.5.33. It reports every captured path that is `CHANGED`, `MISSING`, or `NEW`, and rechecks the production homing safety contract.
+
+It intentionally performs **no repair**. If any captured file was changed or removed, it exits 4 and requires review before any old file is restored. This prevents a 2.3.5.33 Klipper or CFS file from being copied blindly onto a newer, potentially incompatible firmware.
+
+CI covers both an unchanged post-update comparison and a simulated firmware overwrite where `sensorless.cfg`, `eddy_z_acquire.py`, and the firmware version are changed. The simulated audit must detect the differences, preserve the altered files, and return the review-required exit code.
+
 The public helper and tests should follow the corrected production model above.
