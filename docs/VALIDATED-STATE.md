@@ -230,4 +230,43 @@ It intentionally performs **no repair**. If any captured file was changed or rem
 
 CI covers both an unchanged post-update comparison and a simulated firmware overwrite where `sensorless.cfg`, `eddy_z_acquire.py`, and the firmware version are changed. The simulated audit must detect the differences, preserve the altered files, and return the review-required exit code.
 
+## Release-readiness gate
+
+Before merging/tagging a release or declaring an installed printer ready, run:
+
+```sh
+sh install.sh release-readiness
+```
+
+This is a read-only aggregate gate. It evaluates:
+
+- exact firmware target `2.3.5.33`;
+- required CFS/config files;
+- unique Eddy USB detection;
+- persisted Eddy drive-current calibration;
+- a populated Eddy height map;
+- native Eddy Z ownership;
+- configured fixed napkin wipe;
+- the exact recovered production homing-safety contract;
+- absence of the superseded off-bed Eddy-clearance block;
+- exact SHA256 for the isolated production `ldc1612.py`, `probe_eddy_current.py`, and `bulk_sensor.py` compatibility sources;
+- bounded/fail-stop safety behavior in `eddy_z_acquire.py`;
+- risky states in validated optional add-ons;
+- firmware-update snapshot location readiness;
+- required repository/release files;
+- Git working-tree cleanliness when the install is a Git checkout.
+
+Result levels:
+
+- `PASS` — required check matches the supported release profile.
+- `WARN` — review recommended, but the issue is not treated as a core printer-safety failure.
+- `INFO` — contextual state such as a ZIP/USB install with no Git checkout.
+- `FAIL` — the release candidate is not ready.
+
+Any `FAIL` returns exit code 5 and prints `Release readiness: NOT READY`. A core-safe installation with warnings returns 0 and prints `READY WITH WARNINGS`. A fully matching installation returns 0 and prints `READY`.
+
+The public helper intentionally reports a warning rather than claiming exact production-byte identity for `eddy_z_acquire.py` when its known production checksum does not match but the required bounded/fail-stop safety contract is present.
+
+CI covers both an accepted public-install readiness state and a deliberately modified pre-XY safety command that must produce `NOT READY` / exit 5.
+
 The public helper and tests should follow the corrected production model above.
