@@ -1335,7 +1335,7 @@ def status(args):
     printer = read_text(p["printer"])
     sensorless = read_text(p["sensorless"])
     macros = read_text(p["eddy_macros"])
-    native = bool(re.search(r"(?m)^\\s*endstop_pin:\\s*probe:z_virtual_endstop\\s*$", printer))
+    native = bool(re.search(r"(?m)^\s*endstop_pin:\s*probe:z_virtual_endstop\s*$", printer))
 
     sensorless_hash = (
         sha256_file(p["sensorless"]) if p["sensorless"].exists() else None
