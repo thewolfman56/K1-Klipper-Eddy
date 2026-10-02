@@ -186,6 +186,25 @@ gcode:
 """)
         write(root, "/usr/data/printer_data/config/box.cfg", "[box]\n")
         write(root, "/usr/share/klipper/klippy/extras/bed_mesh.py", "# stock creality bed mesh\n")
+        write(root, "/usr/share/klipper/klippy/mcu.py", """# synthetic Creality .33 mcu
+import sys, os, zlib, logging, math
+import serialhdl, msgproto, pins, chelper, clocksync
+
+# CREALITY_MCU_SENTINEL_MUST_SURVIVE
+
+def add_printer_objects(config):
+    printer = config.get_printer()
+    reactor = printer.get_reactor()
+    mainsync = clocksync.ClockSync(reactor)
+    printer.add_object('mcu', MCU(config.getsection('mcu'), mainsync))
+    for s in config.get_prefix_sections('mcu '):
+        printer.add_object(s.section, MCU(
+            s, clocksync.SecondarySync(reactor, mainsync)))
+
+def get_printer_mcu(printer, name):
+    return printer.lookup_object(name)
+""")
+        write(root, "/usr/share/klipper/klippy/stepper.py", "# CREALITY_STEPPER_SENTINEL\n")
         write(root, "/dev/serial/by-id/usb-Klipper_rp2040_TEST-if00", "")
 
     def install_validated_optional_addons(self, root):
@@ -353,6 +372,23 @@ gcode:
                 (root / "usr/share/klipper/klippy/extras/bed_mesh_creality.py").exists()
             )
 
+            klippy = root / "usr/share/klipper/klippy"
+            self.assertEqual(
+                (klippy / "stepper.py").read_text(),
+                "# CREALITY_STEPPER_SENTINEL\n",
+            )
+            self.assertFalse((klippy / "serialhdl.py").exists())
+            self.assertFalse((klippy / "extras/tmc.py").exists())
+            self.assertFalse((klippy / "extras/gcode_shell_command.py").exists())
+            mcu = (klippy / "mcu.py").read_text()
+            self.assertIn("CREALITY_MCU_SENTINEL_MUST_SURVIVE", mcu)
+            self.assertIn("from upgrade import mcu as upgrade_mcu", mcu)
+            self.assertIn("def _obtain_MCU_class(config):", mcu)
+            self.assertTrue((klippy / "upgrade/mcu.py").exists())
+            self.assertTrue((klippy / "extras/upgrade/probe_eddy_current.py").exists())
+            self.assertTrue((klippy / "extras/probe_eddy_current.py").exists())
+            self.assertTrue((klippy / "extras/temperature_probe.py").exists())
+
             pairs = ",".join(
                 "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
                 for i in range(60)
@@ -466,6 +502,33 @@ gcode:
             )
             self.assertIn("position_endstop: 0", restored)
             self.assertFalse((cfg / "btteddy_mcu.cfg").exists())
+
+            restored_mcu = (
+                root / "usr/share/klipper/klippy/mcu.py"
+            ).read_text()
+            self.assertIn("CREALITY_MCU_SENTINEL_MUST_SURVIVE", restored_mcu)
+            self.assertNotIn("upgrade_mcu", restored_mcu)
+            self.assertEqual(
+                (
+                    root / "usr/share/klipper/klippy/extras/bed_mesh.py"
+                ).read_text(),
+                "# stock creality bed mesh\n",
+            )
+            self.assertFalse(
+                (
+                    root / "usr/share/klipper/klippy/extras/"
+                    "bed_mesh_creality.py"
+                ).exists()
+            )
+            self.assertFalse(
+                (root / "usr/share/klipper/klippy/upgrade/mcu.py").exists()
+            )
+            self.assertFalse(
+                (
+                    root / "usr/share/klipper/klippy/extras/upgrade/"
+                    "probe_eddy_current.py"
+                ).exists()
+            )
 
 
 if __name__ == "__main__":
