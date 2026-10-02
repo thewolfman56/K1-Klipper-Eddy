@@ -135,6 +135,8 @@ The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and recheck
 
 See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior and regression state this helper was derived from.
 
+Before merging/tagging a release, use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for the live-printer, CI, recovery, documentation, and physical-motion release gates.
+
 
 ## Reference documentation
 
