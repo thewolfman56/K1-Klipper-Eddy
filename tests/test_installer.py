@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -8,6 +9,10 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "k1max_cfs_eddy.py"
 FIXTURES = REPO / "tests" / "fixtures"
+
+_SPEC = importlib.util.spec_from_file_location("k1max_cfs_eddy_testmod", SCRIPT)
+INSTALLER = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(INSTALLER)
 
 
 def fixture(name):
@@ -356,6 +361,67 @@ def get_printer_mcu(printer, name):
                 "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
                 sensorless,
             )
+
+    def test_exact_production_hash_overrides_reconstructed_sensorless_contract(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "sensorless.cfg"
+            # Deliberately does NOT match the reconstructed section fixture.
+            path.write_text("""[gcode_macro _IF_HOME_Z]
+gcode:
+  PRODUCTION_VARIANT_WITH_DIFFERENT_FORMATTING
+
+[gcode_macro _HOME_Z]
+gcode:
+  G28 Z
+
+[homing_override]
+gcode:
+  G28
+""")
+            original = INSTALLER.PRODUCTION_SHA256["config/sensorless.cfg"]
+            try:
+                INSTALLER.PRODUCTION_SHA256["config/sensorless.cfg"] = (
+                    INSTALLER.sha256_file(path)
+                )
+                ok, mode, checks = INSTALLER.sensorless_safety_state(
+                    path, path.read_text()
+                )
+                self.assertTrue(ok)
+                self.assertEqual(mode, "exact-production")
+                self.assertTrue(checks["production_sha256"])
+
+                bounded, bounded_mode = INSTALLER.bounded_unknown_z_state(
+                    path, path.read_text()
+                )
+                self.assertTrue(bounded)
+                self.assertEqual(bounded_mode, "exact-production")
+            finally:
+                INSTALLER.PRODUCTION_SHA256["config/sensorless.cfg"] = original
+
+    def test_exact_production_wipe_hash_is_configured_without_helper_marker(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "eddy_nozzle_clear.cfg"
+            # The manually validated production file predates WIPE_MARKER.
+            path.write_text("""[gcode_macro NOZZLE_CLEAR]
+gcode:
+  RESPOND MSG=validated-production-wipe
+""")
+            original = INSTALLER.PRODUCTION_SHA256[
+                "config/eddy_nozzle_clear.cfg"
+            ]
+            try:
+                INSTALLER.PRODUCTION_SHA256[
+                    "config/eddy_nozzle_clear.cfg"
+                ] = INSTALLER.sha256_file(path)
+                ok, mode = INSTALLER.wipe_configured_state(
+                    path, path.read_text()
+                )
+                self.assertTrue(ok)
+                self.assertEqual(mode, "exact-production")
+            finally:
+                INSTALLER.PRODUCTION_SHA256[
+                    "config/eddy_nozzle_clear.cfg"
+                ] = original
 
     def test_verify_production_accepts_expected_machine_specific_differences(self):
         with tempfile.TemporaryDirectory() as td:
