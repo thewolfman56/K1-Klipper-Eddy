@@ -281,4 +281,84 @@ Rollback first creates a safety snapshot of the current state, then restores the
 
 ## Firmware updates
 
-Assume a Creality firmware update can replace patched Klipper files. After any firmware change, do **not** simply re-run `activate`. Start with `doctor` and treat the new firmware as unsupported until its Creality CFS files and homing behavior have been reviewed.
+Assume a Creality firmware update can replace patched Klipper files, startup/service wrappers, or Creality configuration.
+
+### Before the firmware update
+
+Start from a working, idle printer and run:
+
+```sh
+sh install.sh verify-production
+sh install.sh pre-update-snapshot
+```
+
+`pre-update-snapshot` normally refuses to preserve a baseline that already contains `DRIFT`. If you intentionally need to capture a known-drift state for forensic comparison, use:
+
+```sh
+sh install.sh pre-update-snapshot --allow-drift
+```
+
+The snapshot is stored under:
+
+```text
+/usr/data/k1max-cfs-eddy-update-snapshots/
+```
+
+It preserves:
+
+- the complete printer configuration directory;
+- the Eddy compatibility Klipper files;
+- Creality homing, custom macro, print-stats, toolhead and CoreXY files relevant to this integration;
+- Klipper/Moonraker service scripts when present;
+- OctoEverywhere and Mobileraker K1 service wrappers when present;
+- `/etc/rc.local`;
+- the `/usr/bin/git` link/file state;
+- a JSON manifest containing firmware version, SHA256 values, sizes and symlink targets.
+
+No firmware update or restart is initiated by this command.
+
+### After the firmware update and reboot
+
+Do **not** immediately run `activate`, `rollback`, or copy old Klipper files back.
+
+First run:
+
+```sh
+sh install.sh audit-after-update <snapshot-directory>
+```
+
+For example:
+
+```sh
+sh install.sh audit-after-update \
+  20261001-180000-pre-firmware-update
+```
+
+The post-update audit deliberately does not require the current firmware to still be `2.3.5.33`. Its purpose is to inspect an unknown/new firmware before any repair.
+
+It reports:
+
+- `UNCHANGED` — current bytes/link state match the pre-update snapshot;
+- `CHANGED` — the path still exists but content or symlink target changed;
+- `MISSING` — a pre-update file/path was removed;
+- `NEW` — a new file appeared in the captured config set.
+
+By default unchanged files are suppressed for readability. To print every captured path:
+
+```sh
+sh install.sh audit-after-update \
+  <snapshot-directory> \
+  --show-unchanged
+```
+
+The audit also reports the old and new firmware versions and reevaluates the corrected production homing safety contract when `sensorless.cfg` is still available.
+
+If anything was changed or removed, the command exits 4 and prints:
+
+```text
+Result: REVIEW REQUIRED BEFORE ANY RESTORE/REPAIR
+```
+
+This is intentional. A newer firmware may change Klipper APIs, Creality CFS behavior, MCU interfaces, or homing semantics. Restoring `2.3.5.33` files blindly could make the printer unsafe or unbootable.
+
+Only after the differences have been reviewed should a firmware-specific repair/update path be created and tested.
