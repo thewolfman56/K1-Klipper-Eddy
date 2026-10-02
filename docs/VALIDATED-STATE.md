@@ -160,4 +160,26 @@ known-good-eddy-final-20261001-104541
 
 The older snapshot remains useful as a rollback reference, but its validation notes contain an obsolete assumption that pre-XY Eddy `CLEAR_SIDE` could establish physical clearance. Off-bed testing disproved that assumption.
 
+## CI reproduction contract
+
+The cleaned production archive records the whole-file `sensorless.cfg` SHA256:
+
+```text
+548fdaa7d19a0eaf5a943febe416bde97dd736987ecf7e2991a5bd61b0caa12c
+```
+
+The raw archived `sensorless.cfg` bytes were not available as a standalone file in the accessible history when the public regression fixtures were created. The repository therefore does **not** claim that CI currently reproduces this whole-file hash.
+
+Instead, the saved printer transcripts contain the complete pre-final `_IF_HOME_Z`, `_HOME_Z`, and `homing_override` sections plus the exact final three-block safety patch. CI locks the exact recovered final `_IF_HOME_Z`, exact recovered final `_HOME_Z`, exact pre-XY connectivity-only block, and byte-preserves all non-targeted homing sections through activation.
+
+After activation, `sh install.sh status` reports:
+
+```text
+Production safety:     PASS
+```
+
+only when those exact recovered safety blocks match and the superseded off-bed `MARGIN=1.000 MAX_TRAVEL=5.000` guard is absent. Otherwise it reports `DRIFT - REVIEW`.
+
+If the original cleaned production archive is later supplied as a repository test artifact, a whole-file SHA256 regression can be added in addition to this structural/exact-section contract.
+
 The public helper and tests should follow the corrected production model above.
