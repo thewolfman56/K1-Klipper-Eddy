@@ -909,7 +909,7 @@ gcode:
             self.assertIn("Unsafe off-bed guard:  ABSENT (good)", status)
             self.assertIn("Production safety:     PASS", status)
             self.assertIn(
-                "Production file hash:  different (section contract still applies)",
+                "Production file hash:  different (section contract applies)",
                 status,
             )
 
