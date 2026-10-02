@@ -182,4 +182,28 @@ only when those exact recovered safety blocks match and the superseded off-bed `
 
 If the original cleaned production archive is later supplied as a repository test artifact, a whole-file SHA256 regression can be added in addition to this structural/exact-section contract.
 
+## Live production verification
+
+Run:
+
+```sh
+sh install.sh verify-production
+```
+
+The command is read-only and compares the active installation with the final production reference.
+
+Result classes:
+
+- **EXACT** — the active file SHA256 exactly matches the recorded production snapshot.
+- **EXPECTED CUSTOM** — the hash differs, but the difference is expected to be machine-specific and the required safety structure validates.
+- **DRIFT** — the file is missing or a required safety/compatibility contract does not validate.
+
+Machine-specific files are not required to have the reference printer's bytes. In particular, `printer.cfg`, `btteddy_mcu.cfg`, `eddy_nozzle_clear.cfg`, and portions of `gcode_macro.cfg` may legitimately differ because of USB identity, calibration data, other installed includes, or measured napkin-strip coordinates.
+
+The three isolated compatibility sources `extras/upgrade/ldc1612.py`, `extras/upgrade/probe_eddy_current.py`, and `extras/upgrade/bulk_sensor.py` are treated as exact production sources and should match their recorded SHA256 values.
+
+The production `eddy_z_acquire.py` checksum is known, but its complete production bytes were not preserved as a retrievable repository artifact. A non-exact public helper is therefore accepted only when its required bounded-motion and fail-stop safety behavior is present; it is never falsely labeled byte-identical.
+
+The command exits with status 3 when any `DRIFT` item is found, making it suitable for scripted audits while still performing no writes or printer motion.
+
 The public helper and tests should follow the corrected production model above.
