@@ -164,6 +164,41 @@ EDDY_KLIPPY_TOUCHED = EDDY_KLIPPY_FILES + (
     Path("extras/bed_mesh_creality.py"),
 )
 
+UPDATE_TRACKED_PATHS = (
+    "/usr/share/klipper/klippy/mcu.py",
+    "/usr/share/klipper/klippy/toolhead.py",
+    "/usr/share/klipper/klippy/kinematics/corexy.py",
+    "/usr/share/klipper/klippy/extras/homing.py",
+    "/usr/share/klipper/klippy/extras/homing_override.py",
+    "/usr/share/klipper/klippy/extras/custom_macro.py",
+    "/usr/share/klipper/klippy/extras/print_stats.py",
+    "/usr/share/klipper/klippy/extras/bed_mesh.py",
+    "/usr/share/klipper/klippy/extras/bed_mesh_creality.py",
+    "/usr/share/klipper/klippy/extras/probe_eddy_current.py",
+    "/usr/share/klipper/klippy/extras/temperature_probe.py",
+    "/usr/share/klipper/klippy/extras/eddy_z_acquire.py",
+    "/usr/share/klipper/klippy/upgrade/mcu.py",
+    "/usr/share/klipper/klippy/upgrade/msgproto.py",
+    "/usr/share/klipper/klippy/upgrade/serialhdl.py",
+    "/usr/share/klipper/klippy/extras/upgrade/bed_mesh.py",
+    "/usr/share/klipper/klippy/extras/upgrade/bulk_sensor.py",
+    "/usr/share/klipper/klippy/extras/upgrade/bus.py",
+    "/usr/share/klipper/klippy/extras/upgrade/ldc1612.py",
+    "/usr/share/klipper/klippy/extras/upgrade/manual_probe.py",
+    "/usr/share/klipper/klippy/extras/upgrade/probe.py",
+    "/usr/share/klipper/klippy/extras/upgrade/probe_eddy_current.py",
+    "/usr/share/klipper/klippy/extras/upgrade/temperature_probe.py",
+    "/etc/init.d/S55klipper_service",
+    "/etc/init.d/S56moonraker_service",
+    "/etc/init.d/S66octoeverywhere_service",
+    "/etc/init.d/S80mobileraker_service",
+    "/etc/init.d/S80mobileraker",
+    "/etc/rc.local",
+    "/usr/bin/git",
+    "/usr/data/printer_data/octoeverywhere-store/run-octoeverywhere-service.sh",
+    "/usr/data/mobileraker_companion/.k1/run-companion-service.sh",
+)
+
 # Stock CrealityOS 2.3.5.33 hashes recorded immediately before the manual
 # isolated Eddy compatibility install.
 CREALITY_23533_CORE_SHA256 = {
@@ -204,6 +239,7 @@ def printer_paths(root):
         "klippy": root_path(root, "/usr/share/klipper/klippy"),
         "extras": root_path(root, "/usr/share/klipper/klippy/extras"),
         "backups": root_path(root, "/usr/data/k1max-cfs-eddy-backups"),
+        "update_snapshots": root_path(root, "/usr/data/k1max-cfs-eddy-update-snapshots"),
     }
 
 
@@ -1282,6 +1318,216 @@ def status(args):
 
 
 
+
+def file_record(path):
+    path = Path(path)
+    if not path.exists() and not path.is_symlink():
+        return {"exists": False}
+    rec = {
+        "exists": True,
+        "is_symlink": path.is_symlink(),
+    }
+    if path.is_symlink():
+        try:
+            rec["link_target"] = os.readlink(str(path))
+        except OSError:
+            rec["link_target"] = None
+    if path.is_file() or path.is_symlink():
+        try:
+            rec["sha256"] = sha256_file(path)
+            rec["size"] = path.stat().st_size
+        except OSError:
+            rec["sha256"] = None
+            rec["size"] = None
+    return rec
+
+
+def config_tree_records(config_root):
+    root = Path(config_root)
+    records = {}
+    if not root.exists():
+        return records
+    for path in sorted(root.rglob("*")):
+        if path.is_dir() and not path.is_symlink():
+            continue
+        rel = str(path.relative_to(root))
+        records[rel] = file_record(path)
+    return records
+
+
+def pre_update_snapshot(args):
+    """Capture a verified working baseline before a Creality firmware update."""
+    assert_idle(args.root)
+    fw, fw_source = detect_firmware(args.root)
+    if fw != SUPPORTED_FW and not args.force_unsupported:
+        raise Stop(
+            "Pre-update snapshots are intended to start from validated "
+            "%s; detected %s." % (SUPPORTED_FW, fw or "unknown")
+        )
+
+    verify_rc = verify_production(args)
+    if verify_rc != 0 and not args.allow_drift:
+        raise Stop(
+            "Production verification reported DRIFT. Resolve it first or "
+            "repeat with --allow-drift to preserve the current state knowingly."
+        )
+
+    p = printer_paths(args.root)
+    p["update_snapshots"].mkdir(parents=True, exist_ok=True)
+    dest = p["update_snapshots"] / ("%s-pre-firmware-update" % timestamp())
+    n = 1
+    while dest.exists():
+        dest = p["update_snapshots"] / (
+            "%s-pre-firmware-update-%d" % (timestamp(), n)
+        )
+        n += 1
+    dest.mkdir(parents=True)
+
+    # Preserve the complete printer config as recoverable evidence.
+    if p["config"].exists():
+        shutil.copytree(p["config"], dest / "config")
+
+    tracked = {}
+    for absolute in UPDATE_TRACKED_PATHS:
+        src = root_path(args.root, absolute)
+        rec = file_record(src)
+        tracked[absolute] = rec
+        if rec.get("exists"):
+            out = dest / "rootfs" / absolute.lstrip("/")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_symlink():
+                out.symlink_to(os.readlink(str(src)))
+            elif src.is_file():
+                shutil.copy2(src, out)
+
+    manifest = {
+        "kind": "k1max-cfs-eddy-pre-firmware-update",
+        "created": dt.datetime.now().isoformat(),
+        "firmware": fw,
+        "firmware_source": fw_source,
+        "production_verify_exit": verify_rc,
+        "config": config_tree_records(p["config"]),
+        "tracked": tracked,
+    }
+    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
+
+    print("\nPre-firmware-update snapshot created:")
+    print("  %s" % dest)
+    print("  firmware: %s" % (fw or "unknown"))
+    print("  config files recorded: %d" % len(manifest["config"]))
+    print("  system paths recorded: %d" % len(manifest["tracked"]))
+    print("No firmware update, restart, service change, or printer motion was performed.")
+    return 0
+
+
+def resolve_update_snapshot(args):
+    p = printer_paths(args.root)
+    src = Path(args.snapshot)
+    if not src.is_absolute():
+        src = p["update_snapshots"] / src
+    manifest_path = src / "manifest.json"
+    if not manifest_path.exists():
+        raise Stop("Update snapshot manifest not found: %s" % manifest_path)
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("kind") != "k1max-cfs-eddy-pre-firmware-update":
+        raise Stop("Not a K1 Max CFS Eddy firmware-update snapshot: %s" % src)
+    return src, manifest
+
+
+def audit_after_update(args):
+    """Compare post-update files to a saved pre-update baseline; never repair."""
+    src, manifest = resolve_update_snapshot(args)
+    p = printer_paths(args.root)
+    current_fw, current_fw_source = detect_firmware(args.root)
+    rows = []
+
+    def compare(name, before, after):
+        if before.get("exists") and not after.get("exists"):
+            rows.append(("MISSING", name, before, after))
+            return
+        if not before.get("exists") and after.get("exists"):
+            rows.append(("NEW", name, before, after))
+            return
+        if not before.get("exists") and not after.get("exists"):
+            return
+        same = (
+            before.get("sha256") == after.get("sha256")
+            and before.get("is_symlink") == after.get("is_symlink")
+            and before.get("link_target") == after.get("link_target")
+        )
+        rows.append(("UNCHANGED" if same else "CHANGED", name, before, after))
+
+    before_config = manifest.get("config", {})
+    after_config = config_tree_records(p["config"])
+    for rel in sorted(set(before_config) | set(after_config)):
+        compare(
+            "config/" + rel,
+            before_config.get(rel, {"exists": False}),
+            after_config.get(rel, {"exists": False}),
+        )
+
+    for absolute, before in sorted(manifest.get("tracked", {}).items()):
+        compare(
+            absolute,
+            before,
+            file_record(root_path(args.root, absolute)),
+        )
+
+    changed = [r for r in rows if r[0] == "CHANGED"]
+    missing = [r for r in rows if r[0] == "MISSING"]
+    new = [r for r in rows if r[0] == "NEW"]
+    unchanged = [r for r in rows if r[0] == "UNCHANGED"]
+
+    print("K1 Max + CFS + BTT Eddy post-firmware-update audit")
+    print("Snapshot: %s" % src)
+    print("Baseline firmware: %s" % (manifest.get("firmware") or "unknown"))
+    print(
+        "Current firmware:  %s%s"
+        % (
+            current_fw or "unknown",
+            (" (" + current_fw_source + ")") if current_fw_source else "",
+        )
+    )
+    print("Read-only: no repair, restart, service change, or motion was performed.\n")
+
+    for state, name, before, after in rows:
+        if state == "UNCHANGED" and not args.show_unchanged:
+            continue
+        print("%-10s %s" % (state, name))
+        if state == "CHANGED":
+            print("  before: %s" % (before.get("sha256") or "unhashed"))
+            print("  after:  %s" % (after.get("sha256") or "unhashed"))
+            if before.get("link_target") != after.get("link_target"):
+                print(
+                    "  symlink: %r -> %r"
+                    % (before.get("link_target"), after.get("link_target"))
+                )
+
+    print(
+        "\nSummary: %d UNCHANGED, %d CHANGED, %d MISSING, %d NEW"
+        % (len(unchanged), len(changed), len(missing), len(new))
+    )
+
+    sensorless = read_text(p["sensorless"])
+    contract = sensorless_contract(sensorless) if sensorless else {}
+    if contract:
+        print(
+            "Production homing safety contract: %s"
+            % ("PASS" if all(contract.values()) else "DRIFT - REVIEW")
+        )
+    else:
+        print("Production homing safety contract: unavailable")
+
+    # Any changed/missing tracked system path or any changed/missing config
+    # should be reviewed before attempting restore on an unvalidated firmware.
+    if changed or missing:
+        print("Result: REVIEW REQUIRED BEFORE ANY RESTORE/REPAIR")
+        return 4
+
+    print("Result: no pre-update files were overwritten")
+    return 0
+
+
 def verify_production(args):
     """Read-only comparison against the corrected production reference."""
     p = printer_paths(args.root)
@@ -1493,6 +1739,13 @@ def build_parser():
     sub.add_parser("status")
     sub.add_parser("verify-production")
 
+    pre = sub.add_parser("pre-update-snapshot")
+    pre.add_argument("--allow-drift", action="store_true")
+
+    post = sub.add_parser("audit-after-update")
+    post.add_argument("snapshot")
+    post.add_argument("--show-unchanged", action="store_true")
+
     st = sub.add_parser("stage")
     st.add_argument("--eddy-serial")
     st.add_argument("--x-offset", type=float, required=True)
@@ -1542,6 +1795,10 @@ def main():
             status(args)
         elif args.command == "verify-production":
             return verify_production(args)
+        elif args.command == "pre-update-snapshot":
+            return pre_update_snapshot(args)
+        elif args.command == "audit-after-update":
+            return audit_after_update(args)
         elif args.command == "rollback":
             rollback(args)
         else:
