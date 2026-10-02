@@ -455,6 +455,167 @@ def get_printer_mcu(printer, name):
             self.assertIn("DRIFT           sensorless.cfg:", proc.stdout)
             self.assertIn("Result: REVIEW REQUIRED", proc.stdout)
 
+    def test_firmware_update_snapshot_and_no_change_audit(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+            pairs = ",".join(
+                "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+                for i in range(60)
+            )
+            pending = root / "pending.json"
+            pending.write_text(json.dumps({
+                "probe_eddy_current btt_eddy": {
+                    "reg_drive_current": "16",
+                    "calibrate": pairs,
+                }
+            }))
+            self.run_helper(
+                root, "persist", "--pending-json", str(pending)
+            )
+            self.run_helper(root, "activate")
+            self.run_helper(
+                root, "configure-wipe",
+                "--start-x", "70.5", "--start-y", "305.5",
+                "--start-surface-z", "4.2",
+                "--end-x", "90.5", "--end-y", "305.5",
+                "--end-surface-z", "4.35",
+                "--confirm-measured",
+            )
+
+            snap_out = self.run_helper(
+                root, "pre-update-snapshot"
+            ).stdout
+            self.assertIn(
+                "Pre-firmware-update snapshot created:", snap_out
+            )
+            snapshots = sorted(
+                (
+                    root / "usr/data/k1max-cfs-eddy-update-snapshots"
+                ).glob("*-pre-firmware-update*")
+            )
+            self.assertEqual(len(snapshots), 1)
+            manifest = json.loads(
+                (snapshots[0] / "manifest.json").read_text()
+            )
+            self.assertEqual(
+                manifest["kind"],
+                "k1max-cfs-eddy-pre-firmware-update",
+            )
+            self.assertEqual(manifest["firmware"], "2.3.5.33")
+            self.assertIn("sensorless.cfg", manifest["config"])
+            self.assertIn(
+                "/usr/share/klipper/klippy/extras/eddy_z_acquire.py",
+                manifest["tracked"],
+            )
+
+            audit = self.run_helper(
+                root, "audit-after-update", str(snapshots[0])
+            ).stdout
+            self.assertIn(
+                "K1 Max + CFS + BTT Eddy post-firmware-update audit",
+                audit,
+            )
+            self.assertIn("0 CHANGED, 0 MISSING, 0 NEW", audit)
+            self.assertIn(
+                "Production homing safety contract: PASS", audit
+            )
+            self.assertIn(
+                "Result: no pre-update files were overwritten", audit
+            )
+
+    def test_firmware_update_audit_detects_overwrites_without_repair(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+            pairs = ",".join(
+                "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+                for i in range(60)
+            )
+            pending = root / "pending.json"
+            pending.write_text(json.dumps({
+                "probe_eddy_current btt_eddy": {
+                    "reg_drive_current": "16",
+                    "calibrate": pairs,
+                }
+            }))
+            self.run_helper(
+                root, "persist", "--pending-json", str(pending)
+            )
+            self.run_helper(root, "activate")
+            self.run_helper(
+                root, "configure-wipe",
+                "--start-x", "70.5", "--start-y", "305.5",
+                "--start-surface-z", "4.2",
+                "--end-x", "90.5", "--end-y", "305.5",
+                "--end-surface-z", "4.35",
+                "--confirm-measured",
+            )
+            self.run_helper(root, "pre-update-snapshot")
+            snapshot = next(
+                (
+                    root / "usr/data/k1max-cfs-eddy-update-snapshots"
+                ).glob("*-pre-firmware-update*")
+            )
+
+            # Simulate a Creality update overwriting both config and Klipper,
+            # plus changing the firmware version.
+            write(root, "/etc/ota_info", "version=2.3.5.34\n")
+            sensorless = (
+                root / "usr/data/printer_data/config/sensorless.cfg"
+            )
+            before_sensorless = sensorless.read_text()
+            sensorless.write_text(
+                before_sensorless.replace(
+                    "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
+                    "EDDY_HOME_STATUS SAMPLES=25 TIMEOUT=2",
+                )
+            )
+            helper = (
+                root
+                / "usr/share/klipper/klippy/extras/eddy_z_acquire.py"
+            )
+            helper_before = helper.read_text()
+            helper.write_text("# firmware replaced helper\n")
+
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--root", str(root),
+                    "audit-after-update", str(snapshot),
+                ],
+                cwd=REPO, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 4)
+            self.assertIn("Baseline firmware: 2.3.5.33", proc.stdout)
+            self.assertIn("Current firmware:  2.3.5.34", proc.stdout)
+            self.assertIn("CHANGED    config/sensorless.cfg", proc.stdout)
+            self.assertIn(
+                "CHANGED    /usr/share/klipper/klippy/extras/eddy_z_acquire.py",
+                proc.stdout,
+            )
+            self.assertIn(
+                "Production homing safety contract: DRIFT - REVIEW",
+                proc.stdout,
+            )
+            self.assertIn(
+                "Result: REVIEW REQUIRED BEFORE ANY RESTORE/REPAIR",
+                proc.stdout,
+            )
+
+            # Audit is read-only: it must not repair either modified file.
+            self.assertNotEqual(sensorless.read_text(), before_sensorless)
+            self.assertEqual(
+                helper.read_text(), "# firmware replaced helper\n"
+            )
+
     def test_complete_staged_flow_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
