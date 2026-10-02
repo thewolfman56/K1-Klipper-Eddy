@@ -238,7 +238,11 @@ Review the generated macro, issue `FIRMWARE_RESTART`, and test the wipe with imm
 
 ```sh
 sh install.sh status
+sh install.sh verify-production
+sh install.sh release-readiness
 ```
+
+For a release candidate, also complete [the v1.0 release checklist](RELEASE-CHECKLIST.md), including the physical cold-start homing, Eddy fail-stop, fixed napkin wipe, 20×20 rapid-scan, full CFS print-path, and recovery checks.
 
 Expected state:
 
