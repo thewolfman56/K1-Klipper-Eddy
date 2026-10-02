@@ -8,6 +8,7 @@ import argparse
 import configparser
 import datetime as dt
 import glob
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -109,6 +110,50 @@ VALIDATED_PRE_XY_BLOCK = """  {% if x_axes is not defined or x_axes[2] is not de
 """
 
 
+# The real .33 installation deliberately kept ordinary Creality Klipper
+# modules in place and installed only isolated compatibility namespaces,
+# thin loaders, the bed_mesh router, and the Eddy helper.
+EDDY_KLIPPY_FILES = (
+    Path("upgrade/__init__.py"),
+    Path("upgrade/mcu.py"),
+    Path("upgrade/msgproto.py"),
+    Path("upgrade/serialhdl.py"),
+    Path("extras/upgrade/__init__.py"),
+    Path("extras/upgrade/bed_mesh.py"),
+    Path("extras/upgrade/bulk_sensor.py"),
+    Path("extras/upgrade/bus.py"),
+    Path("extras/upgrade/ldc1612.py"),
+    Path("extras/upgrade/manual_probe.py"),
+    Path("extras/upgrade/probe.py"),
+    Path("extras/upgrade/probe_eddy_current.py"),
+    Path("extras/upgrade/temperature_probe.py"),
+    Path("extras/probe_eddy_current.py"),
+    Path("extras/temperature_probe.py"),
+    Path("extras/bed_mesh.py"),
+    Path("extras/eddy_z_acquire.py"),
+)
+
+EDDY_KLIPPY_TOUCHED = EDDY_KLIPPY_FILES + (
+    Path("mcu.py"),
+    Path("extras/bed_mesh_creality.py"),
+)
+
+# Stock CrealityOS 2.3.5.33 hashes recorded immediately before the manual
+# isolated Eddy compatibility install.
+CREALITY_23533_CORE_SHA256 = {
+    "extras/probe.py":
+        "432633cfd1168c1f4e5f8321a7bf03b95684f26e52a604df01f44e32aa559f5f",
+    "extras/manual_probe.py":
+        "7431f2629021f92c8ea84e8d078bb4c4cfa760e4b946d5abc519747d318e215e",
+    "extras/bed_mesh.py":
+        "6ba9f844b5d1a1a51c36a385e480775a3aafb50a5fe474908e7560259ab40957",
+    "extras/bus.py":
+        "9fd8580ce182b6fd878653f23f155d856f60994941dbef0f10dbc78f34fe62a9",
+    "mcu.py":
+        "4b5b902cd424e9dd4dacd376c3431dc9d84e02dd9a93ebb49b84ac3b548de3ec",
+}
+
+
 class Stop(RuntimeError):
     pass
 
@@ -141,6 +186,14 @@ def read_text(path):
         return Path(path).read_text(errors="replace")
     except OSError:
         return ""
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def atomic_write(path, data):
@@ -450,20 +503,9 @@ def backup(args, reason="manual"):
     dest.mkdir(parents=True)
     shutil.copytree(p["config"], dest / "config")
 
-    touched = []
-    src_klippy = repo_root() / "klippy"
-    for src in src_klippy.rglob("*.py"):
-        rel = src.relative_to(src_klippy)
+    touched = [str(rel) for rel in EDDY_KLIPPY_TOUCHED]
+    for rel in EDDY_KLIPPY_TOUCHED:
         target = p["klippy"] / rel
-        touched.append(str(rel))
-        if target.exists():
-            out = dest / "klippy-original" / rel
-            out.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, out)
-    for rel in [Path("extras/bed_mesh_creality.py"), Path("extras/eddy_z_acquire.py")]:
-        target = p["klippy"] / rel
-        if str(rel) not in touched:
-            touched.append(str(rel))
         if target.exists():
             out = dest / "klippy-original" / rel
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -487,21 +529,159 @@ def ensure_include(printer_cfg, include_name):
     atomic_write(printer_cfg, directive + "\n" + text)
 
 
+def _mcu_router_state(text):
+    has_import = "from upgrade import mcu as upgrade_mcu" in text
+    has_selector = "def _obtain_MCU_class(config):" in text
+    if has_import and has_selector:
+        return "patched"
+    if has_import or has_selector:
+        return "partial"
+    return "stock"
+
+
+def patch_mcu_router(path):
+    """Apply only the validated .33 MCU-class routing patch."""
+    text = read_text(path)
+    state = _mcu_router_state(text)
+    if state == "patched":
+        return
+    if state == "partial":
+        raise Stop(
+            "mcu.py contains a partial Eddy router patch; refusing to guess."
+        )
+
+    import_anchor = "import serialhdl, msgproto, pins, chelper, clocksync\n"
+    if import_anchor not in text:
+        raise Stop(
+            "Expected CrealityOS 2.3.5.33 mcu.py import anchor was not found."
+        )
+
+    old = """def add_printer_objects(config):
+    printer = config.get_printer()
+    reactor = printer.get_reactor()
+    mainsync = clocksync.ClockSync(reactor)
+    printer.add_object('mcu', MCU(config.getsection('mcu'), mainsync))
+    for s in config.get_prefix_sections('mcu '):
+        printer.add_object(s.section, MCU(
+            s, clocksync.SecondarySync(reactor, mainsync)))
+"""
+    new = """def _obtain_MCU_class(config):
+    if config.getboolean('stock_implementation', True):
+        return MCU
+    return upgrade_mcu.MCU
+
+def add_printer_objects(config):
+    printer = config.get_printer()
+    reactor = printer.get_reactor()
+    mainsync = clocksync.ClockSync(reactor)
+    mcu = _obtain_MCU_class(config.getsection('mcu'))
+    printer.add_object('mcu', mcu(config.getsection('mcu'), mainsync))
+    for s in config.get_prefix_sections('mcu '):
+        mcu = _obtain_MCU_class(s)
+        printer.add_object(s.section, mcu(
+            s, clocksync.SecondarySync(reactor, mainsync)))
+"""
+    if text.count(old) != 1:
+        raise Stop(
+            "Expected CrealityOS 2.3.5.33 add_printer_objects block "
+            "was not found exactly once."
+        )
+
+    text = text.replace(
+        import_anchor,
+        import_anchor + "from upgrade import mcu as upgrade_mcu\n",
+        1,
+    )
+    text = text.replace(old, new, 1)
+    atomic_write(path, text)
+
+
+def validate_creality_core(root, p):
+    """Validate stock core files that the manual install intentionally kept."""
+    # Synthetic test roots do not contain the full Creality source files.
+    strict_hashes = str(root) == "/"
+    results = {}
+    for rel_s, expected in CREALITY_23533_CORE_SHA256.items():
+        path = p["klippy"] / rel_s
+        if not path.exists():
+            if strict_hashes:
+                raise Stop("Required Creality Klipper file missing: %s" % path)
+            results[rel_s] = "missing-test-fixture"
+            continue
+
+        # mcu.py is expected to differ after the validated router patch.
+        if rel_s == "mcu.py" and _mcu_router_state(read_text(path)) == "patched":
+            results[rel_s] = "validated-router-present"
+            continue
+
+        # bed_mesh.py becomes the small conditional router after first install;
+        # the original must then exist as bed_mesh_creality.py.
+        if rel_s == "extras/bed_mesh.py" and "bed_mesh_creality" in read_text(path):
+            preserved = p["extras"] / "bed_mesh_creality.py"
+            if not preserved.exists():
+                raise Stop(
+                    "bed_mesh.py is routed but bed_mesh_creality.py is missing."
+                )
+            if strict_hashes and sha256_file(preserved) != expected:
+                raise Stop(
+                    "Preserved Creality bed_mesh.py hash does not match "
+                    "the validated 2.3.5.33 baseline."
+                )
+            results[rel_s] = "router+preserved-stock"
+            continue
+
+        actual = sha256_file(path)
+        if strict_hashes and actual != expected:
+            raise Stop(
+                "Creality core hash mismatch for %s: expected %s, got %s"
+                % (rel_s, expected, actual)
+            )
+        results[rel_s] = actual
+    return results
+
+
 def copy_klippy_tree(root):
+    """Install only the isolated compatibility files used on the real printer."""
     p = printer_paths(root)
     src_root = repo_root() / "klippy"
     p["klippy"].mkdir(parents=True, exist_ok=True)
 
+    validate_creality_core(root, p)
+
+    # Preserve the original Creality bed_mesh byte-for-byte before installing
+    # the conditional router.  Never overwrite an existing preserved copy.
     stock_bed = p["extras"] / "bed_mesh.py"
     saved_bed = p["extras"] / "bed_mesh_creality.py"
-    if stock_bed.exists() and not saved_bed.exists():
+    if not saved_bed.exists():
+        if not stock_bed.exists():
+            raise Stop("Creality bed_mesh.py is missing.")
+        if "bed_mesh_creality" in read_text(stock_bed):
+            raise Stop(
+                "bed_mesh.py already looks routed but no preserved "
+                "bed_mesh_creality.py exists."
+            )
+        if str(root) == "/":
+            expected = CREALITY_23533_CORE_SHA256["extras/bed_mesh.py"]
+            actual = sha256_file(stock_bed)
+            if actual != expected:
+                raise Stop(
+                    "Refusing to preserve unknown bed_mesh.py; expected "
+                    "CrealityOS 2.3.5.33 hash %s, got %s"
+                    % (expected, actual)
+                )
         shutil.copy2(stock_bed, saved_bed)
 
-    for src in src_root.rglob("*.py"):
-        rel = src.relative_to(src_root)
+    for rel in EDDY_KLIPPY_FILES:
+        src = src_root / rel
+        if not src.exists():
+            raise Stop("Repository compatibility file missing: %s" % rel)
         dst = p["klippy"] / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+
+    # Keep Creality's mcu.py and apply only the validated routing delta.
+    patch_mcu_router(p["klippy"] / "mcu.py")
+
 
 
 def make_eddy_cfg(serial, x_offset, y_offset, z_offset):
