@@ -22,6 +22,31 @@ MARKER = "# K1MAX_CFS_EDDY_HELPER"
 WIPE_MARKER = "# K1MAX_CFS_EDDY_WIPE_CONFIGURED=1"
 PRODUCTION_SENSORLESS_SHA256 = "548fdaa7d19a0eaf5a943febe416bde97dd736987ecf7e2991a5bd61b0caa12c"
 
+PRODUCTION_SHA256 = {
+    "config/printer.cfg":
+        "bde6f5eba8049eb523555e8e95028d55c3fdb91979173acbc26f47dcd8da133a",
+    "config/sensorless.cfg":
+        PRODUCTION_SENSORLESS_SHA256,
+    "config/gcode_macro.cfg":
+        "dd8485b7ae2670f3fb28989263c29a2a176010cb3e05a7a4181c313fe03f4bc2",
+    "config/printer_params.cfg":
+        "f39ace4c7d667674542d2e73d81fa41253eb888a09c6c0f9eb375aea307c3381",
+    "config/btteddy_mcu.cfg":
+        "5fe4bbb17eb34181aa388619c6d22ff51a4c16698fc07a376317c558e4b9c2f4",
+    "config/eddy_nozzle_clear.cfg":
+        "5318022508d0a1a114e86ac8f4bfe7432ae3831ceb44d5be242dcf970a7661bf",
+    "config/box.cfg":
+        "fb380eab607710592defe9541ca26236004b81018e3eaeb0562ba79b9fbf774d",
+    "klippy/extras/eddy_z_acquire.py":
+        "3ec1f7a218bba1a2326164d6d7f528a7fda2529fd6a0598e58a120db7fe3b31d",
+    "klippy/extras/upgrade/ldc1612.py":
+        "4e62a646656707b65245b3c3af2a3b3388e78f0468e0891d560afe9153978645",
+    "klippy/extras/upgrade/probe_eddy_current.py":
+        "896c458cf9817fd7d1d507a50464b79df89dd8f937dadb5f124a53bf0f1c8a8a",
+    "klippy/extras/upgrade/bulk_sensor.py":
+        "e3c27157658ba28b209ea7702d10c2b431136f6c498a99675094b0e709ea0a23",
+}
+
 # Exact safety sections recovered from the corrected production validation.
 # These intentionally preserve Creality comments/structure around the Eddy edits.
 VALIDATED_IF_HOME_Z = """[gcode_macro _IF_HOME_Z]
@@ -1256,6 +1281,178 @@ def status(args):
     print("Fixed napkin wipe:     %s" % ("configured" if WIPE_MARKER in macros else "NOT CONFIGURED"))
 
 
+
+def verify_production(args):
+    """Read-only comparison against the corrected production reference."""
+    p = printer_paths(args.root)
+    rows = []
+
+    def record(name, path, expected_hash, custom_ok=None, custom_message=""):
+        path = Path(path)
+        if not path.exists():
+            rows.append(("DRIFT", name, "missing", None, expected_hash))
+            return
+        actual = sha256_file(path)
+        if actual == expected_hash:
+            rows.append(("EXACT", name, "production SHA256 match", actual, expected_hash))
+            return
+        ok = False
+        message = custom_message
+        if custom_ok is not None:
+            try:
+                ok = bool(custom_ok(path))
+            except Exception as exc:
+                message = "validation error: %s" % exc
+                ok = False
+        if ok:
+            rows.append((
+                "EXPECTED CUSTOM", name,
+                message or "machine-specific bytes differ but required structure is valid",
+                actual, expected_hash,
+            ))
+        else:
+            rows.append((
+                "DRIFT", name,
+                message or "SHA256 differs and required structure was not validated",
+                actual, expected_hash,
+            ))
+
+    def sensorless_ok(path):
+        return all(sensorless_contract(read_text(path)).values())
+
+    def printer_ok(path):
+        text = read_text(path)
+        return (
+            re.search(
+                r"(?m)^\s*endstop_pin:\s*probe:z_virtual_endstop\s*$",
+                text,
+            )
+            is not None
+            and "[include btteddy_mcu.cfg]" in text
+            and "[include eddy_nozzle_clear.cfg]" in text
+        )
+
+    def eddy_cfg_ok(path):
+        reg, points = calibration_state(path)
+        text = read_text(path)
+        return (
+            "[probe_eddy_current btt_eddy]" in text
+            and reg is not None
+            and points >= 50
+            and "serial:" in text
+        )
+
+    def wipe_ok(path):
+        text = read_text(path)
+        return (
+            WIPE_MARKER in text
+            and "[gcode_macro NOZZLE_CLEAR]" in text
+            and "[gcode_macro CHECK_BED_MESH]" in text
+        )
+
+    def gcode_macro_ok(path):
+        text = read_text(path)
+        block = section_core(text, "[gcode_macro ACCURATE_G28]")
+        return (
+            block is not None
+            and "probe_eddy_current btt_eddy" in block
+            and "ACCURATE_HOME_Z" in block
+        )
+
+    def eddy_helper_ok(path):
+        text = read_text(path)
+        # The production helper's checksum is known, but its complete bytes
+        # were not recoverable as a repository artifact.  A non-exact helper
+        # is accepted only if the required public safety commands exist and
+        # the motion command remains bounded and positive-only.
+        return (
+            "EDDY_HOME_STATUS" in text
+            and "EDDY_PREHOME_CLEAR" in text
+            and "force_move.manual_move" in text
+            and "move_distance = min(step, remaining)" in text
+            and "if freq_change > 40.0:" in text
+            and "total_moved >= 0.075" in text
+        )
+
+    record(
+        "sensorless.cfg",
+        p["sensorless"],
+        PRODUCTION_SHA256["config/sensorless.cfg"],
+        sensorless_ok,
+        "exact recovered production safety sections match",
+    )
+    record(
+        "printer.cfg",
+        p["printer"],
+        PRODUCTION_SHA256["config/printer.cfg"],
+        printer_ok,
+        "machine-specific config differs; native Eddy Z and required includes are present",
+    )
+    record(
+        "btteddy_mcu.cfg",
+        p["eddy_cfg"],
+        PRODUCTION_SHA256["config/btteddy_mcu.cfg"],
+        eddy_cfg_ok,
+        "machine-specific serial/calibration differs; calibrated Eddy config is present",
+    )
+    record(
+        "eddy_nozzle_clear.cfg",
+        p["eddy_macros"],
+        PRODUCTION_SHA256["config/eddy_nozzle_clear.cfg"],
+        wipe_ok,
+        "printer-specific napkin coordinates differ; guarded wipe/mesh macros are present",
+    )
+    record(
+        "gcode_macro.cfg",
+        p["gcode_macro"],
+        PRODUCTION_SHA256["config/gcode_macro.cfg"],
+        gcode_macro_ok,
+        "other macro content differs; Eddy-aware ACCURATE_G28 routing is present",
+    )
+
+    # These compatibility modules should remain exact production sources.
+    for rel in (
+        "extras/upgrade/ldc1612.py",
+        "extras/upgrade/probe_eddy_current.py",
+        "extras/upgrade/bulk_sensor.py",
+    ):
+        record(
+            rel,
+            p["klippy"] / rel,
+            PRODUCTION_SHA256["klippy/" + rel],
+        )
+
+    record(
+        "extras/eddy_z_acquire.py",
+        p["klippy"] / "extras/eddy_z_acquire.py",
+        PRODUCTION_SHA256["klippy/extras/eddy_z_acquire.py"],
+        eddy_helper_ok,
+        "production checksum is known but exact helper bytes are unrecovered; required safety behavior is present",
+    )
+
+    print("K1 Max + CFS + BTT Eddy production verification")
+    print("Reference: known-good-eddy-production-20261001-153849")
+    print("Read-only: no files, services, or printer state were changed.\n")
+    for state, name, message, actual, expected in rows:
+        print("%-15s %-36s %s" % (state, name + ":", message))
+        if actual and actual != expected:
+            print("  current:   %s" % actual)
+            print("  reference: %s" % expected)
+
+    exact = sum(1 for row in rows if row[0] == "EXACT")
+    custom = sum(1 for row in rows if row[0] == "EXPECTED CUSTOM")
+    drift = sum(1 for row in rows if row[0] == "DRIFT")
+    print(
+        "\nSummary: %d EXACT, %d EXPECTED CUSTOM, %d DRIFT"
+        % (exact, custom, drift)
+    )
+    if drift:
+        print("Result: REVIEW REQUIRED")
+        return 3
+    print("Result: production safety profile accepted")
+    return 0
+
+
 def rollback(args):
     assert_idle(args.root)
     src = Path(args.backup_dir)
@@ -1294,6 +1491,7 @@ def build_parser():
     sub.add_parser("doctor")
     sub.add_parser("backup")
     sub.add_parser("status")
+    sub.add_parser("verify-production")
 
     st = sub.add_parser("stage")
     st.add_argument("--eddy-serial")
@@ -1342,6 +1540,8 @@ def main():
             configure_wipe(args)
         elif args.command == "status":
             status(args)
+        elif args.command == "verify-production":
+            return verify_production(args)
         elif args.command == "rollback":
             rollback(args)
         else:
