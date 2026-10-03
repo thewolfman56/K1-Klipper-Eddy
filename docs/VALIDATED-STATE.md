@@ -114,10 +114,16 @@ This fail-stop behavior is preferable to continuing with stale probe data.
 - runtime mesh compensation during the purge line
 - complete Creality CFS start-print path
 
-The corrected end-to-end path completed:
+The original production snapshot completed the Creality CFS start path with
+`CX_PRINT_DRAW_ONE_LINE` still inside `START_PRINT`. A later physical
+regression on **2026-10-02** identified that ordering as wrong for slicer-owned
+CFS selection: the Creality purge ran before OrcaSlicer's first `T...` command.
+
+The now-validated startup sequence is:
 
 ```text
-BOX_START_PRINT
+START_PRINT
+  → BOX_START_PRINT
   → CX_ROUGH_G28
   → corrected protected homing
   → CX_NOZZLE_CLEAR
@@ -128,11 +134,22 @@ BOX_START_PRINT
   → Eddy CHECK_BED_MESH
   → 20×20 / 400-point rapid_scan
   → eddy_runtime session mesh
-  → CX_PRINT_DRAW_ONE_LINE
-  → successful purge
+  → return to slicer WITHOUT CX_PRINT_DRAW_ONE_LINE
+OrcaSlicer T{current_extruder}
+  → selected CFS filament loads
+M109 S[first-layer temperature]
+  → nozzle returns to print temperature
+OrcaSlicer custom purge
+  → purge runs with the selected filament already loaded
 ```
 
-The final purge state also showed a difference between requested G-code Z and actual toolhead Z, confirming active runtime mesh compensation.
+The 2026-10-02 physical test print completed successfully, including the first
+layer and a real mid-print CFS tool change. The tested OrcaSlicer configuration
+is documented in `docs/ORCASLICER-CFS-GCODE.md`.
+
+The startup purge still runs under active runtime mesh compensation; only its
+ownership/order changed from Creality `START_PRINT` to the slicer after the
+first CFS tool selection.
 
 ## Intentional Creality behavior retained
 
