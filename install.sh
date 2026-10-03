@@ -1,4 +1,15 @@
-#!/bin/bash
+#!/bin/sh
+set -eu
 
-rsync --verbose --recursive --exclude-from=./exclude.txt --include-from=./include.txt ./klippy /usr/share/klipper
-rsync --verbose --recursive --backup --suffix=.bak --include 'config/*.cfg' --exclude-from=./exclude.txt ./config /usr/data/printer_data
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ -x /usr/share/klippy-env/bin/python ]; then
+    PY=/usr/share/klippy-env/bin/python
+elif command -v python3 >/dev/null 2>&1; then
+    PY=python3
+else
+    echo "ERROR: Python 3 was not found." >&2
+    exit 1
+fi
+
+exec "$PY" "$SCRIPT_DIR/scripts/k1max_cfs_eddy.py" "$@"
