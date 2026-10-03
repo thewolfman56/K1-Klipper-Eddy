@@ -29,7 +29,7 @@ PRODUCTION_SHA256 = {
     "config/sensorless.cfg":
         PRODUCTION_SENSORLESS_SHA256,
     "config/gcode_macro.cfg":
-        "dd8485b7ae2670f3fb28989263c29a2a176010cb3e05a7a4181c313fe03f4bc2",
+        "64c133a15c7b33fb916090b93eaac936ab9ac171fc12273588283f26ce2b73ac",
     "config/printer_params.cfg":
         "f39ace4c7d667674542d2e73d81fa41253eb888a09c6c0f9eb375aea307c3381",
     "config/btteddy_mcu.cfg":
@@ -2081,7 +2081,7 @@ def verify_production(args):
     record(
         "gcode_macro.cfg",
         p["gcode_macro"],
-        None,
+        PRODUCTION_SHA256["config/gcode_macro.cfg"],
         gcode_macro_ok,
         "Eddy-aware ACCURATE_G28 is present and START_PRINT does not purge before CFS load",
     )
