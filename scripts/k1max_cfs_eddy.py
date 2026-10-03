@@ -1210,6 +1210,59 @@ gcode:
     atomic_write(path, replace_section(text, "[gcode_macro ACCURATE_G28]", section))
 
 
+def start_print_cfs_order_ok(path):
+    """True when START_PRINT wipes/calibrates but does not purge before CFS load."""
+    block = section_core(read_text(path), "[gcode_macro START_PRINT]")
+    if block is None:
+        return False
+    commands = [line.strip() for line in block.splitlines()]
+    return (
+        "CX_NOZZLE_CLEAR" in commands
+        and "CX_PRINT_DRAW_ONE_LINE" not in commands
+    )
+
+
+def patch_start_print_cfs_order(path):
+    """Remove only Creality's pre-CFS purge call from START_PRINT.
+
+    OrcaSlicer owns the startup purge after its first T command.  The
+    CX_NOZZLE_CLEAR call remains in START_PRINT so the calibrated Eddy-safe
+    napkin wipe still runs before accurate homing / bed leveling.
+    """
+    text = read_text(path)
+    block = section_core(text, "[gcode_macro START_PRINT]")
+    if block is None:
+        raise Stop("Expected [gcode_macro START_PRINT] section not found.")
+
+    lines = block.splitlines()
+    stripped = [line.strip() for line in lines]
+    if "CX_NOZZLE_CLEAR" not in stripped:
+        raise Stop(
+            "START_PRINT does not contain the expected CX_NOZZLE_CLEAR call; "
+            "refusing to guess at an unknown start sequence."
+        )
+
+    matches = [
+        i for i, line in enumerate(lines)
+        if line.strip() == "CX_PRINT_DRAW_ONE_LINE"
+    ]
+    if not matches:
+        return
+    if len(matches) != 1:
+        raise Stop(
+            "Expected exactly one CX_PRINT_DRAW_ONE_LINE inside START_PRINT; "
+            "found %d." % len(matches)
+        )
+
+    del lines[matches[0]]
+    atomic_write(
+        path,
+        replace_section(
+            text, "[gcode_macro START_PRINT]", "\n".join(lines)
+        ),
+    )
+
+
 def activate(args):
     doctor(args, write=True)
     p = printer_paths(args.root)
@@ -1225,6 +1278,7 @@ def activate(args):
     patch_stepper_z(p["printer"])
     patch_native_homing(p["sensorless"])
     patch_accurate_g28(p["gcode_macro"])
+    patch_start_print_cfs_order(p["gcode_macro"])
     print("Native Eddy Z activation written. No motion command was sent.")
     print("Review the files, issue FIRMWARE_RESTART, then validate G28 with your hand on power.")
 
@@ -1401,6 +1455,14 @@ def status(args):
             "configured (exact production SHA256)"
             if wipe_ok and wipe_mode == "exact-production"
             else ("configured" if wipe_ok else "NOT CONFIGURED")
+        )
+    )
+    print(
+        "START_PRINT CFS order: %s"
+        % (
+            "PASS (CFS loads before slicer purge)"
+            if start_print_cfs_order_ok(p["gcode_macro"])
+            else "DRIFT - PRE-CFS PURGE PRESENT OR START_PRINT UNKNOWN"
         )
     )
 
@@ -1650,6 +1712,16 @@ def release_readiness(args):
             "PASS" if p[key].exists() else "FAIL",
             label,
             "present" if p[key].exists() else "missing",
+        )
+
+    if p["gcode_macro"].exists():
+        cfs_order_ok = start_print_cfs_order_ok(p["gcode_macro"])
+        add(
+            "PASS" if cfs_order_ok else "FAIL",
+            "START_PRINT CFS order",
+            "napkin wipe retained; pre-CFS purge removed"
+            if cfs_order_ok
+            else "expected CX_NOZZLE_CLEAR with no CX_PRINT_DRAW_ONE_LINE inside START_PRINT",
         )
 
     serial = detect_eddy_serial(args.root)
@@ -1956,6 +2028,7 @@ def verify_production(args):
             block is not None
             and "probe_eddy_current btt_eddy" in block
             and "ACCURATE_HOME_Z" in block
+            and start_print_cfs_order_ok(path)
         )
 
     def eddy_helper_ok(path):
@@ -2001,12 +2074,16 @@ def verify_production(args):
         wipe_ok,
         "printer-specific napkin coordinates differ; guarded wipe/mesh macros are present",
     )
+    # START_PRINT was physically validated after the original production
+    # snapshot: keep the napkin wipe in START_PRINT, but leave startup purging
+    # to the slicer after the first CFS T command.  Validate this structurally
+    # instead of accepting the pre-fix whole-file hash as authoritative.
     record(
         "gcode_macro.cfg",
         p["gcode_macro"],
-        PRODUCTION_SHA256["config/gcode_macro.cfg"],
+        "__POST_CFS_ORDER_CONTRACT__",
         gcode_macro_ok,
-        "other macro content differs; Eddy-aware ACCURATE_G28 routing is present",
+        "Eddy-aware ACCURATE_G28 is present and START_PRINT does not purge before CFS load",
     )
 
     # These compatibility modules should remain exact production sources.
