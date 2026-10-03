@@ -147,6 +147,12 @@ The 2026-10-02 physical test print completed successfully, including the first
 layer and a real mid-print CFS tool change. The tested OrcaSlicer configuration
 is documented in `docs/ORCASLICER-CFS-GCODE.md`.
 
+The physically validated post-test `gcode_macro.cfg` SHA256 is:
+
+```text
+64c133a15c7b33fb916090b93eaac936ab9ac171fc12273588283f26ce2b73ac
+```
+
 The startup purge still runs under active runtime mesh compensation; only its
 ownership/order changed from Creality `START_PRINT` to the slicer after the
 first CFS tool selection.
