@@ -2081,7 +2081,7 @@ def verify_production(args):
     record(
         "gcode_macro.cfg",
         p["gcode_macro"],
-        "__POST_CFS_ORDER_CONTRACT__",
+        None,
         gcode_macro_ok,
         "Eddy-aware ACCURATE_G28 is present and START_PRINT does not purge before CFS load",
     )
@@ -2111,9 +2111,12 @@ def verify_production(args):
     print("Read-only: no files, services, or printer state were changed.\n")
     for state, name, message, actual, expected in rows:
         print("%-15s %-36s %s" % (state, name + ":", message))
-        if actual and actual != expected:
+        if actual and expected and actual != expected:
             print("  current:   %s" % actual)
             print("  reference: %s" % expected)
+        elif actual and expected is None:
+            print("  current:   %s" % actual)
+            print("  reference: structural START_PRINT CFS-order contract")
 
     exact = sum(1 for row in rows if row[0] == "EXACT")
     custom = sum(1 for row in rows if row[0] == "EXPECTED CUSTOM")
