@@ -29,6 +29,8 @@ Highlights:
 - deliberate two-pass X/Y sensorless homing retained;
 - 20×20 / 400-point Eddy `rapid_scan`;
 - fixed CFS napkin wipe with per-printer measured coordinates;
+- corrected CFS startup order: `START_PRINT` keeps the napkin wipe but no longer purges before the slicer's first CFS `T...` load;
+- validated OrcaSlicer 2.4.2 Machine Start / Change Filament G-code in `docs/ORCASLICER-CFS-GCODE.md`;
 - Eddy-only calibration persistence instead of blind `SAVE_CONFIG`;
 - rollback support;
 - optional add-on compatibility auditing;
@@ -227,6 +229,10 @@ Do not copy these from the reference printer:
 - measured napkin-strip surface Z coordinates
 
 ## Physical validation requirement
+
+The corrected load-before-purge startup sequence and a real mid-print CFS tool
+change were physically validated successfully on 2026-10-02 using OrcaSlicer
+2.4.2.
 
 CI cannot prove real nozzle/bed clearance, sensorless homing forces, napkin contact pressure, or CFS material motion.
 
