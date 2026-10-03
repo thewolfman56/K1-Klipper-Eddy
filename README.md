@@ -22,6 +22,7 @@ The workflow is intentionally split into **calibration staging** and **native Ed
 - uses Eddy only as a connectivity check while XY is unknown, preserves Creality's bounded unhomed-Z-away move, and only trusts Eddy clearance after XY is centered over the bed;
 - retains Creality's deliberate two-pass sensorless X/Y homing;
 - routes CFS leveling to a fresh 20×20 `rapid_scan` Eddy mesh;
+- removes Creality's pre-CFS `CX_PRINT_DRAW_ONE_LINE` from `START_PRINT` while retaining the Eddy-safe napkin wipe, so the slicer can load the selected CFS filament before purging;
 - blocks nozzle wiping until the fixed napkin strip has been measured on that printer;
 - can restore the full configuration and every Klipper file it touched from a helper backup.
 
@@ -42,6 +43,8 @@ The napkin strip is not conductive, so Eddy **cannot measure the wipe surface di
 Read the full guide first: [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md).
 
 Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) for the Entware/Git bootstrap commands and the supported/blocked Helper Script add-on matrix.
+
+Before slicing a print, configure OrcaSlicer with the validated CFS startup and tool-change G-code in [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md). This is required so `START_PRINT` performs the Eddy-safe napkin wipe and leveling first, the slicer then loads the selected CFS filament, and the startup purge happens only after that load.
 
 Validated optional Helper Script add-ons on the reference machine include **Improved Shapers Calibrations, Moonraker Timelapse, Camera Settings Control, OctoEverywhere, and Mobileraker Companion**. OctoEverywhere and Mobileraker required the K1-specific stock-Python/service-wrapper fixes documented in that guide.
 
