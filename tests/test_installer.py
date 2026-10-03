@@ -185,7 +185,16 @@ gcode:
     _HOME_Z
   {% endif %}
 """)
-        write(root, "/usr/data/printer_data/config/gcode_macro.cfg", """[gcode_macro ACCURATE_G28]
+        write(root, "/usr/data/printer_data/config/gcode_macro.cfg", """[gcode_macro START_PRINT]
+variable_prepare: 0
+gcode:
+  BOX_START_PRINT
+  CX_NOZZLE_CLEAR
+  ACCURATE_G28
+  CX_PRINT_LEVELING_CALIBRATION
+  CX_PRINT_DRAW_ONE_LINE
+
+[gcode_macro ACCURATE_G28]
 gcode:
   ACCURATE_HOME_Z
 """)
@@ -855,6 +864,13 @@ gcode:
 
             printer = (cfg / "printer.cfg").read_text()
             sensorless = (cfg / "sensorless.cfg").read_text()
+            gcode_macro = (cfg / "gcode_macro.cfg").read_text()
+            start_print = section_core(
+                gcode_macro, "[gcode_macro START_PRINT]"
+            )
+            self.assertIsNotNone(start_print)
+            self.assertIn("CX_NOZZLE_CLEAR", start_print)
+            self.assertNotIn("CX_PRINT_DRAW_ONE_LINE", start_print)
             self.assertIn("endstop_pin: probe:z_virtual_endstop", printer)
             self.assertNotIn("position_endstop:", printer)
             self.assertNotIn(
