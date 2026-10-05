@@ -1,99 +1,168 @@
-# Development and support for this repository are being discontinued. Please refer to the dynamically developing [mikeinredding/K1Max-Klipper-Eddy](https://github.com/mikeinredding/K1Max-Klipper-Eddy) fork.
+# K1 Max + CFS + BTT Eddy Duo — CrealityOS 2.3.5.33
 
-# K1-Klipper-Eddy
+This fork packages the **validated K1 Max + Creality CFS + BTT Eddy Duo** conversion into a guarded helper instead of a collection of one-off file edits.
 
-This project is centaur with a body of stock creality K1 series firmware v2.3.5.35 (yeah, it is for CFS) and head in the form of several SimpleAF modules that are required for purposes of BTT Eddy support. The project ports several modules, code portions even configuration files from famous [pellcorp/SimpleAF project](https://pellcorp.github.io/creality-wiki/).
+> **Validated target:** Creality **K1 Max**, official CFS upgrade path, **CrealityOS 2.3.5.33**, BTT Eddy Duo over USB, and the fixed CFS napkin-strip wipe described below.
+>
+> Other firmware revisions are **not claimed as compatible**. The helper stops on anything other than `2.3.5.33` unless `--force-unsupported` is deliberately supplied.
 
-NOTES: The project is still in develop phaze. Everything you are doing, you are doing at your own risk. Printer physical damage is possible. The author is not responsible for any consequences of using this project.
+The project is derived from [`vsevolod-volkov/K1-Klipper-Eddy`](https://github.com/vsevolod-volkov/K1-Klipper-Eddy) and its SimpleAF-derived Eddy compatibility work. That repository is archived; this fork preserves GPLv3 licensing and adds the K1 Max/CFS/2.3.5.33 integration that was validated on a real printer.
 
-## Goals
-The main goal of the project is to allow Creality CFS users to switch from PRTouch v2 to BTT Eddy for faster and more precise automated bed leveling.
+## What the helper does
 
-However there are some technical goals achieving of that must allow to successfuly adopt the project to upcoming versions of either Creality stock firmware or SimpleAF:
-1. Keep as many stock creality modules untouched as possible.
-2. Port as few SimpleAF modules without changes as possible.
-3. Preserve SimpleAF Eddy MCU compatibility to simplify SimpleAF migration in future when and if it will become CFS compatible.
+The workflow is intentionally split into **calibration staging** and **native Eddy activation**:
 
-## Prerequisites
-1. Root the printer as shown on [creality-helper-script wiki page](https://guilouz.github.io/Creality-Helper-Script-Wiki/firmwares/install-and-update-rooted-firmware-k1/).
-2. The git out of the box in v2.3.5.35 does not work with github.You shoud install functioning git before continue. The simplest way to do that - use entware:
-```bash
-wget http://bin.entware.net/mipselsf-k3.4/installer/generic.sh -O - | sh
-export PATH=/opt/bin:/opt/sbin:$PATH
-opkg update
-opkg install git-http
-opkg install git
-mv /usr/bin/git /usr/bin/git.backup
-ln -s /opt/bin/git /usr/bin/git
-```
-3. Mount BTT Eddy to your printer then upload firmware to it according to [SimpleAF instructions](https://pellcorp.github.io/creality-wiki/btteddy/#probe-installation), but do not install SimpleAF itself.
+- checks firmware, CFS files, root environment, printer idle state, and the Eddy USB serial;
+- creates timestamped rollback snapshots before every write stage;
+- preserves Creality's original `bed_mesh.py` and routes between Creality/PRTouch and Eddy implementations;
+- keeps the proprietary PRTouch object available for CFS while allowing Eddy to own the global probe;
+- stages Eddy while PRTouch/TMC still owns Z so Eddy can be calibrated safely;
+- persists only Eddy calibration values instead of blindly saving unrelated Creality `SAVE_CONFIG` state;
+- switches `[stepper_z]` to `probe:z_virtual_endstop` only after calibration is present;
+- uses Eddy only as a connectivity check while XY is unknown, preserves Creality's bounded unhomed-Z-away move, and only trusts Eddy clearance after XY is centered over the bed;
+- retains Creality's deliberate two-pass sensorless X/Y homing;
+- routes CFS leveling to a fresh 20×20 `rapid_scan` Eddy mesh;
+- removes Creality's pre-CFS `CX_PRINT_DRAW_ONE_LINE` from `START_PRINT` while retaining the Eddy-safe napkin wipe, so the slicer can load the selected CFS filament before purging;
+- blocks nozzle wiping until the fixed napkin strip has been measured on that printer;
+- can restore the full configuration and every Klipper file it touched from a helper backup.
 
-## Installation
-1. Log in to K1 with ssh command:
-```bash
-ssh root@ip-address-of-k1
-```
-2. Clone K1-Klipper-Eddy sources from github with git command then enter project directory:
-```bash
-cd /usr/data
-git clone https://github.com/vsevolod-volkov/K1-Klipper-Eddy.git
-cd K1-Klipper-Eddy
-```
-3. Run installation script:
-```bash
-sh ./install.sh
-```
-4. Copy eddy support files to your klipper configuration directory:
-```bash
-cd config
-cp btteddy.cfg btteddy_macro.cfg fan_control.cfg /usr/data/printer_data/config
-```
-5. Add following lines to the beginning of your *printer.cfg* klipper configuration file:
-```
-[include fan_control.cfg]
-[include btteddy.cfg]
-[include btteddy_macro.cfg]
-```
-6. Find and comment out with hash sign those lines in ```[stepper_z]``` section of your *printer.cfg* klipper configuration file:
-```
-[stepper_z]
-...
-endstop_pin: tmc2209_stepper_z:virtual_endstop
-position_endstop: 0 
-...
-```
-The result will look like that:
-```
-[stepper_z]
-...
-# endstop_pin: tmc2209_stepper_z:virtual_endstop
-# position_endstop: 0 
-...
+The helper itself **never sends `G28`, `PROBE`, wipe moves, heater commands, or print commands**.
+
+## Hardware / physical prerequisites
+
+1. Creality K1 Max with the CFS upgrade installed and working on stock Creality CFS firmware.
+2. BTT Eddy Duo mounted rigidly and flashed with Klipper-compatible firmware. BTT recommends mounting Eddy roughly **2–3 mm above the nozzle**.
+3. The validated probe geometry used an Eddy offset of approximately **X = -23 mm, Y = 0 mm**. Verify your own mount before using those values.
+4. A fixed napkin-strip holder compatible with the K1 Max CFS conversion. The validated build used **“K1 Max Napkin Strip Saver for use with CFS Upgrade Kit” by Eric Sten (@EricSten_321774), Printables model 1286860**. Search by that exact title if the model URL changes.
+5. SSH access to the rooted printer and a way to stop power quickly during first motion tests.
+
+The napkin strip is not conductive, so Eddy **cannot measure the wipe surface directly**. The wipe path is stored as fixed, printer-specific coordinates after manual measurement.
+
+## Fast path
+
+Read the full guide first: [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md).
+
+Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) for the Entware/Git bootstrap commands and the supported/blocked Helper Script add-on matrix.
+
+Before slicing a print, configure OrcaSlicer with the validated CFS startup and tool-change G-code in [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md). This is required so `START_PRINT` performs the Eddy-safe napkin wipe and leveling first, the slicer then loads the selected CFS filament, and the startup purge happens only after that load.
+
+> **Final reference regression (2026-10-05):** the normal CFS cutter/purge path,
+> initial T0 load, real T0 -> T1 change, material flush, and prime-tower
+> continuation were physically validated with the mounted Eddy Duo. The frozen
+> reference snapshot is
+> `/usr/data/printer_data/backups/K1Max-CFS-BTT-Eddy-known-good-20261005-133356`.
+> The obsolete slicer-emitted `CFS_NOZZLE_CLEAR` / `CFS_NOZZLE_CLEAN`
+> side-brush path is intentionally excluded; a fresh slice must also not
+> reintroduce `CX_PRINT_DRAW_ONE_LINE`.
+
+Validated optional Helper Script add-ons on the reference machine include **Improved Shapers Calibrations, Moonraker Timelapse, Camera Settings Control, OctoEverywhere, and Mobileraker Companion**. OctoEverywhere and Mobileraker required the K1-specific stock-Python/service-wrapper fixes documented in that guide.
+
+`sh install.sh doctor` now audits those optional components without changing them. It reports `PASS`, `INFO`, or `WARN` for Camera Settings Control, OctoEverywhere, and Mobileraker, including stock-vs-Entware Python, K1 `exec` wrappers, process counts, and PID-file consistency.
+
+After rooting, mounting/flashing Eddy, and putting this repository on the printer:
+
+```sh
+sh install.sh doctor
+sh install.sh stage --x-offset -23 --y-offset 0
 ```
 
-7. Add following line in ```[stepper_z]``` section of your *printer.cfg* klipper configuration file:
-```
-[stepper_z]
-...
-endstop_pin: probe:z_virtual_endstop
-```
-8. Comment out whole ```[prtouch_v2]``` and ```[bed_mesh]``` sections of your *printer.cfg* klipper configuration file with hash sign or delete them at all. Commenting out the ```[mcu leveling_mcu]``` section will allow you to avoid leveling MCU overheating when using high bed temperatures and prevent print emergency stops. Comment it if you do not use it for some purposes. 
-9. Type ```ls /dev/serial/by-id/*``` into the printer command line. The found device will be what you enter into your *btteddy.cfg* under ```[mcu eddy]``` for the *serial* variable. 
-10. Change Eddy MCU path inside *btteddy.cfg* file:
-```
-[mcu eddy]
-...
-serial: /dev/serial/by-id/usb-Klipper_rp2040_xxxxxxxxx
-...
-```
-11.  Depending of [BTT Eddy mount option](https://pellcorp.github.io/creality-wiki/btteddy/#mount-options) you choose, correct *x_offset* and *y_offset* in *btteddy.cfg* under ```[probe_eddy_current btt_eddy]``` section. Defaault values given for "Default" mount option.
-22.   Reboot your printer.
+Review the generated config, then issue `FIRMWARE_RESTART` from Fluidd. Perform Eddy drive-current and height-map calibration as described in the guide. After each calibration operation that creates a pending Eddy setting:
 
-## Calibration
+```sh
+sh install.sh persist
+```
 
-Follow the [SimpleAF instruction](https://pellcorp.github.io/creality-wiki/btteddy/#calibration) steps to perform:
-- drive current calibration
-- nozzle height mapping calibration
-- temperature calibration.
+Once `sh install.sh status` shows a drive current and a populated height map:
 
-**IMPORTANT:** Please pay an attention that stock Creality ```G28 X Y``` implementation does not move carriage to bed center. To avoid that you may move it to center (x=110, y=110 for K1/K1C/K1SE) with fluidd or mainsail. You also need to run ```_SET_KIN_MAX_Z``` macro after ```G28 X Y``` even when proceed with *Mapping Eddy Readings To Nozzle Heights* calibration according to SimpleAF instructions.
+```sh
+sh install.sh activate
+```
+
+After reviewing the changes, issue `FIRMWARE_RESTART`, validate homing, then measure the CFS napkin strip and install its fixed wipe path:
+
+```sh
+sh install.sh configure-wipe \
+  --start-x <measured-x> --start-y <measured-y> --start-surface-z <measured-z> \
+  --end-x <measured-x> --end-y <measured-y> --end-surface-z <measured-z> \
+  --confirm-measured
+```
+
+Until `configure-wipe` is completed, `NOZZLE_CLEAR` intentionally raises an error instead of guessing a wipe height.
+
+After activation and wipe configuration, the live printer can be checked against the final reference without changing anything:
+
+```sh
+sh install.sh verify-production
+```
+
+`EXACT` means the file SHA256 matches the final reference snapshot. `EXPECTED CUSTOM` means bytes differ for an allowed printer-specific reason (for example USB serial, calibration curve, includes, or measured napkin coordinates) while the required safety structure still validates. `DRIFT` means a required file is missing or its validated safety/compatibility contract no longer matches.
+
+For one final release-candidate check, run:
+
+```sh
+sh install.sh release-readiness
+```
+
+The readiness command is also read-only. Core safety/integrity problems produce `FAIL` and exit code 5. Optional add-on or repository-working-tree concerns produce `WARN` without turning an otherwise safe printer into a false failure. Because the public `eddy_z_acquire.py` is safety-contract validated but is not falsely claimed to be byte-identical to the unrecovered production helper, the current public build may legitimately report `READY WITH WARNINGS`.
+
+Before any future Creality firmware update, create a separate update baseline:
+
+```sh
+sh install.sh pre-update-snapshot
+```
+
+After the firmware update and reboot, **do not immediately restore old files**. Audit the new firmware first:
+
+```sh
+sh install.sh audit-after-update <snapshot-directory>
+```
+
+The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and rechecks the production homing safety contract. It performs no repair and can be run even when the new firmware is no longer `2.3.5.33`.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `doctor` | Read-only firmware/CFS/Eddy preflight plus validated optional add-on audit |
+| `backup` | Create a timestamped rollback snapshot |
+| `stage` | Install Eddy support for calibration while PRTouch/TMC still owns Z |
+| `persist` | Save only pending Eddy calibration values into `btteddy_mcu.cfg` |
+| `activate` | Enable native Eddy Z and the validated homing/CFS safety routing |
+| `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
+| `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
+| `verify-production` | Read-only comparison against the final production snapshot; reports `EXACT`, `EXPECTED CUSTOM`, or `DRIFT` and exits nonzero on drift |
+| `release-readiness` | Read-only aggregate PASS/WARN/INFO/FAIL release audit across firmware, calibration, homing safety, native Z, wipe, compatibility sources, optional add-ons, update-snapshot readiness, and repository integrity |
+| `pre-update-snapshot` | Verify the working installation, then preserve the full printer config and update-sensitive Klipper/service files before a firmware update |
+| `audit-after-update <snapshot>` | Read-only post-update comparison showing exactly which captured files were changed, removed, or added; performs no repair |
+| `rollback <dir>` | Restore a helper-created backup |
+
+## Important boundaries
+
+- **Do not copy another printer's Eddy calibration curve, USB serial, or napkin-strip Z values.** They are intentionally absent from this repository.
+- **Do not use Eddy `CLEAR_SIDE` as proof of physical clearance while XY is unknown.** The probe may be hanging off the bed; the validated cold-start path uses a connectivity-only Eddy check plus Creality's bounded Z-away move until XY is centered.
+- Do not run `activate` before drive-current and height-map calibration are persisted.
+- Do not use this branch as proof of compatibility with `2.3.5.34`, `2.3.5.35`, the newer `1.1.x` K1 Max firmware line, or a different motherboard/CFS-C conversion.
+- Creality firmware updates can overwrite patched Klipper files. Create a `pre-update-snapshot` first, then use `audit-after-update` after reboot. **Do not blindly restore `.33` Klipper files onto a newer firmware.** This release should be treated as a `2.3.5.33` target only.
+- The original upstream installer is retained as `legacy-install.sh` for reference and is **not** the recommended installation method for this fork.
+
+See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior and regression state this helper was derived from.
+
+Before merging/tagging a release, use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for the live-printer, CI, recovery, documentation, and physical-motion release gates.
+Draft v1.0.0 release text is maintained in [`docs/RELEASE-NOTES-v1.0.0.md`](docs/RELEASE-NOTES-v1.0.0.md).
+
+A Git-free install archive can be built reproducibly with:
+
+```sh
+python3 scripts/build_release.py \
+  --version v1.0.0 \
+  --output dist/K1-Klipper-Eddy-v1.0.0.zip
+```
+
+The ZIP contains the installer, required Klipper compatibility files, configuration templates, license, and user documentation. It intentionally excludes Git metadata, CI files, tests, caches, and Python bytecode. A `RELEASE-MANIFEST.json` inside the archive records the target firmware, production reference, entrypoint, version, and source commit when available.
+
+
+## Reference documentation
+
+- Creality K1 root/SSH workflow: https://guilouz.github.io/Creality-Helper-Script-Wiki/firmwares/install-and-update-rooted-firmware-k1/
+- BIGTREETECH Eddy hardware/mounting: https://neo.bttwiki.com/zh/docs/accessories-docs/sensor/eddy/eddy-hardware
+- BIGTREETECH Eddy calibration reference: https://github.com/bigtreetech/Eddy

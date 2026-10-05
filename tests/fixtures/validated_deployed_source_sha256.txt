@@ -1,0 +1,3 @@
+4e62a646656707b65245b3c3af2a3b3388e78f0468e0891d560afe9153978645  klippy/extras/upgrade/ldc1612.py
+896c458cf9817fd7d1d507a50464b79df89dd8f937dadb5f124a53bf0f1c8a8a  klippy/extras/upgrade/probe_eddy_current.py
+e3c27157658ba28b209ea7702d10c2b431136f6c498a99675094b0e709ea0a23  klippy/extras/upgrade/bulk_sensor.py

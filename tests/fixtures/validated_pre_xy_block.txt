@@ -1,0 +1,14 @@
+  {% if x_axes is not defined or x_axes[2] is not defined %}
+    BED_MESH_CLEAR
+
+    # BTT Eddy connectivity check ONLY.
+    # XY is not yet known, so the probe may be off-bed.
+    # Do not interpret CLEAR_SIDE here as physical nozzle clearance.
+    # This command performs no intentional motion and prevents homing
+    # from continuing if the Eddy MCU/sensor is unavailable.
+    {% if 'probe_eddy_current btt_eddy' in printer.configfile.settings %}
+      {action_respond_info("Checking BTT Eddy connectivity before homing; clearance is NOT evaluated until XY is known\n")}
+      EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2
+    {% endif %}
+  {% endif %}
+
