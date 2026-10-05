@@ -160,6 +160,13 @@ custom Orca purge
 
 ## 8. Recovery / update safety
 
+> Reference printer completion: Stage 64B created
+> `/usr/data/k1max-cfs-eddy-backups/20261005-165654-manual` and
+> `/usr/data/k1max-cfs-eddy-update-snapshots/20261005-165658-pre-firmware-update`.
+> The update snapshot manifest recorded firmware `2.3.5.33`, 148 config
+> records, 32 tracked system paths, and `production_verify_exit: 0`.
+
+
 Before tagging:
 
 ```sh
@@ -167,11 +174,11 @@ sh install.sh backup
 sh install.sh pre-update-snapshot
 ```
 
-- [ ] A normal helper backup can be created.
-- [ ] A firmware-update snapshot can be created.
-- [ ] Snapshot manifest records firmware `2.3.5.33`.
-- [ ] Snapshot contains the full printer config.
-- [ ] Snapshot records the relevant Klipper/service paths.
+- [x] A normal helper backup can be created.
+- [x] A firmware-update snapshot can be created.
+- [x] Snapshot manifest records firmware `2.3.5.33`.
+- [x] Snapshot contains the full printer config.
+- [x] Snapshot records the relevant Klipper/service paths.
 - [x] Rollback has already passed the synthetic CI test.
 - [x] Documentation clearly says **not** to restore old `.33` Klipper files blindly onto future firmware.
 - [x] `docs/RELEASE-NOTES-v1.0.0.md` matches the final supported profile and known limitations.
