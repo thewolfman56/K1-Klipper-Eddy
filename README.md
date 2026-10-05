@@ -6,6 +6,20 @@ This fork packages the **validated K1 Max + Creality CFS + BTT Eddy Duo** conver
 >
 > Other firmware revisions are **not claimed as compatible**. The helper stops on anything other than `2.3.5.33` unless `--force-unsupported` is deliberately supplied.
 
+## Important safety, warranty, and liability notice
+
+> **Use this project entirely at your own risk.** This is an unofficial community project and is not supported, endorsed, or warranted by Creality, BIGTREETECH, or any other printer or hardware manufacturer.
+>
+> This repository modifies a rooted printer's configuration and Klipper environment, including homing, probing, Z-axis behavior, bed meshing, nozzle wiping, and CFS-related workflows. Differences in hardware, assembly, probe mounting, calibration, firmware, slicer settings, or user-entered measurements can cause unexpected motion or failures, including nozzle/bed/probe collisions, toolhead crashes, damaged electronics or mechanical parts, failed prints, data loss, or other property damage.
+>
+> **You are responsible for deciding whether these modifications are appropriate for your printer, making and verifying your own backups, checking every machine-specific value, validating motion carefully, and maintaining immediate access to printer power during first-use testing.**
+>
+> To the maximum extent permitted by applicable law, the repository owner and contributors provide this project **without warranty** and are **not responsible or liable for damage to your printer or other property, personal injury, loss of data, loss of use, failed prints, downtime, or other losses arising from use or misuse of this repository.**
+>
+> Rooting the printer, replacing or modifying firmware/configuration files, installing third-party hardware, or otherwise altering the machine **may affect or void manufacturer warranty or service eligibility**. Warranty rights vary by manufacturer, seller, jurisdiction, and applicable consumer-protection law. You are responsible for reviewing the terms that apply to your printer before proceeding.
+>
+> This project remains licensed under GPLv3. See [`LICENSE`](LICENSE), including its **NO WARRANTY** provisions.
+
 The project is derived from [`vsevolod-volkov/K1-Klipper-Eddy`](https://github.com/vsevolod-volkov/K1-Klipper-Eddy) and its SimpleAF-derived Eddy compatibility work. That repository is archived; this fork preserves GPLv3 licensing and adds the K1 Max/CFS/2.3.5.33 integration that was validated on a real printer.
 
 ## What the helper does
