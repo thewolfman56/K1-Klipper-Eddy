@@ -47,32 +47,32 @@ Required core state:
 - [x] Fixed CFS napkin wipe is configured for this printer.
 - [x] Production homing safety contract reports `PASS`.
 - [x] Superseded `MARGIN=1.000 MAX_TRAVEL=5.000` pre-XY Eddy-clearance block is absent.
-- [ ] Exact production compatibility hashes pass for:
+- [x] Exact production compatibility hashes pass for:
   - `extras/upgrade/ldc1612.py`
   - `extras/upgrade/probe_eddy_current.py`
   - `extras/upgrade/bulk_sensor.py`
-- [ ] No `FAIL` appears in `release-readiness`.
+- [x] No `FAIL` appears in `release-readiness`.
 
-A `WARN` for the public `eddy_z_acquire.py` is currently expected when its bounded/fail-stop safety contract passes but its bytes do not match the known, unrecovered production helper checksum. Do not convert this warning to `PASS` merely to make the report visually clean.
+A `WARN` for the public `eddy_z_acquire.py` is allowed when its bounded/fail-stop safety contract passes but its bytes do not match the known production helper checksum. The 2026-10-05 reference printer matched the exact production helper SHA256 and therefore reported `PASS`; do not force other safe-but-nonexact installs to `PASS` merely to make the report visually clean.
 
 ## 3. Optional validated add-ons
 
 If installed, verify:
 
-- [ ] Camera Settings Control loads its Helper Script config and `CAM_*` macros.
-- [ ] Improved Shapers Calibrations remains available.
-- [ ] Moonraker Timelapse remains available.
-- [ ] OctoEverywhere:
-  - [ ] uses stock Creality Python 3.8 profile;
-  - [ ] does not depend on `/opt/bin/python3`;
-  - [ ] K1 run wrapper uses `exec`;
-  - [ ] exactly one `moonraker_octoeverywhere` process is running;
-  - [ ] PID file matches the running process.
-- [ ] Mobileraker Companion:
-  - [ ] uses stock Creality Python 3.8 profile;
-  - [ ] K1 wrapper uses `exec`;
-  - [ ] exactly one `mobileraker.py` process is running;
-  - [ ] PID file matches the running process.
+- [x] Camera Settings Control loads its Helper Script config and `CAM_*` macros.
+- [x] Improved Shapers Calibrations remains available.
+- [x] Moonraker Timelapse remains available.
+- [x] OctoEverywhere:
+  - [x] uses stock Creality Python 3.8 profile;
+  - [x] does not depend on `/opt/bin/python3`;
+  - [x] K1 run wrapper uses `exec`;
+  - [x] exactly one `moonraker_octoeverywhere` process is running;
+  - [x] PID file matches the running process.
+- [x] Mobileraker Companion:
+  - [x] uses stock Creality Python 3.8 profile;
+  - [x] K1 wrapper uses `exec`;
+  - [x] exactly one `mobileraker.py` process is running;
+  - [x] PID file matches the running process.
 
 `sh install.sh doctor` and `release-readiness` should surface risky optional states as warnings.
 
