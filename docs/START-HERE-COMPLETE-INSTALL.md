@@ -219,11 +219,11 @@ The napkin is non-conductive, so Eddy cannot detect its surface. Wipe Z values m
 
 ## Step 10 — Clone the stable release
 
-For the validated `v1.0.0` source:
+For the current documentation release, use `v1.0.1`:
 
 ~~~sh
 cd /usr/data
-git clone --branch v1.0.0 --depth 1 https://github.com/thewolfman56/K1-Klipper-Eddy.git
+git clone --branch v1.0.1 --depth 1 https://github.com/thewolfman56/K1-Klipper-Eddy.git
 cd K1-Klipper-Eddy
 ~~~
 
