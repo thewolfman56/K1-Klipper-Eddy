@@ -174,14 +174,14 @@ The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and recheck
 See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior and regression state this helper was derived from.
 
 Before merging/tagging a release, use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for the live-printer, CI, recovery, documentation, and physical-motion release gates.
-Draft v1.0.0 release text is maintained in [`docs/RELEASE-NOTES-v1.0.0.md`](docs/RELEASE-NOTES-v1.0.0.md).
+Current release notes are maintained in [`docs/RELEASE-NOTES-v1.0.1.md`](docs/RELEASE-NOTES-v1.0.1.md). Historical v1.0.0 notes remain in [`docs/RELEASE-NOTES-v1.0.0.md`](docs/RELEASE-NOTES-v1.0.0.md).
 
 A Git-free install archive can be built reproducibly with:
 
 ```sh
 python3 scripts/build_release.py \
-  --version v1.0.0 \
-  --output dist/K1-Klipper-Eddy-v1.0.0.zip
+  --version v1.0.1 \
+  --output dist/K1-Klipper-Eddy-v1.0.1.zip
 ```
 
 The ZIP contains the installer, required Klipper compatibility files, configuration templates, license, and user documentation. It intentionally excludes Git metadata, CI files, tests, caches, and Python bytecode. A `RELEASE-MANIFEST.json` inside the archive records the target firmware, production reference, entrypoint, version, and source commit when available.
