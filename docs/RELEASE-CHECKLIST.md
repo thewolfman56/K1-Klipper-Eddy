@@ -8,8 +8,10 @@ A green GitHub Actions run is necessary but not sufficient. The physical-printer
 
 ## 1. Repository / CI gate
 
+> Final checklist close-out is committed only after a green CI run on the preceding exact release-candidate head; this checklist-only commit must itself also pass CI before merge/tag.
+
 - [x] Draft PR contains only intended K1 Max + CFS + Eddy changes.
-- [ ] GitHub Actions is green on the exact commit that will be tagged.
+- [x] GitHub Actions is green on the exact commit that will be tagged.
 - [x] Python compile checks pass for:
   - `scripts/k1max_cfs_eddy.py`
   - `klippy/extras/eddy_z_acquire.py`
