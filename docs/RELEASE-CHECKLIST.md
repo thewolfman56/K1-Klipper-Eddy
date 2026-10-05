@@ -121,7 +121,8 @@ Do not repeat USB disconnect testing during an active print or motion.
 - [ ] Complete CFS start path succeeds:
 
 ```text
-BOX_START_PRINT
+START_PRINT
+  → BOX_START_PRINT
   → CX_ROUGH_G28
   → corrected protected G28
   → CX_NOZZLE_CLEAR
@@ -131,9 +132,29 @@ BOX_START_PRINT
   → CX_PRINT_LEVELING_CALIBRATION
   → CHECK_BED_MESH
   → 20×20 rapid_scan
-  → CX_PRINT_DRAW_ONE_LINE
-  → successful purge / print
+  → return to OrcaSlicer WITHOUT CX_PRINT_DRAW_ONE_LINE
+T{current_extruder}
+  → CFS loads selected filament
+M109 S[first-layer temperature]
+  → wait for print temperature
+custom Orca purge
+  → purge / print
 ```
+
+- [ ] Orca Machine Start G-code matches `docs/ORCASLICER-CFS-GCODE.md`.
+- [ ] Orca Change Filament G-code uses the conditional `z_after_toolchange` restore.
+- [ ] Freshly sliced startup G-code contains zero `CFS_NOZZLE_CLEAR`.
+- [ ] Freshly sliced startup G-code contains zero `CFS_NOZZLE_CLEAN`.
+- [ ] Freshly sliced startup G-code contains zero `CX_PRINT_DRAW_ONE_LINE`.
+- [ ] Initial `T...` selection occurs before the custom purge.
+- [ ] `M109` reaches first-layer temperature before extrusion purge moves.
+- [ ] A real mid-print T0 -> T1 CFS change completes.
+- [ ] Normal CFS cutter/purge-chute clearance is safe with the Eddy Duo mount.
+- [ ] Prime-tower/wipe continuation resumes after the tool change.
+
+> Reference machine: all checks above passed in the final 2026-10-05 regression.
+> The validated reference G-code SHA256 is
+> `9bfd7adc514f2df839489425f1d09347c87a75d0fa2e26b027808ce1481b02bb`.
 
 ## 8. Recovery / update safety
 
