@@ -14,6 +14,54 @@ The cleaned archive contains no Python bytecode/cache files and has final SHA256
 11582373c6f9d3886afc58644851a8be1c987da3128618974c2e93091f01e408
 ```
 
+## Frozen operational baseline — 2026-10-05
+
+The October 1 archive remains the installer's recovered production-source
+reference. After the final startup/CFS regression, the actual reference printer
+was frozen again on **2026-10-05** as the current operational known-good state:
+
+```text
+/usr/data/printer_data/backups/K1Max-CFS-BTT-Eddy-known-good-20261005-133356
+```
+
+That snapshot was SHA256-manifested and then verified file-by-file. The most
+important exact hashes are:
+
+```text
+printer.cfg
+e67fd181163b034d9c12538424319ee9b8d6d97c38e03ec43ff7bac4a96abbac
+
+gcode_macro.cfg
+64c133a15c7b33fb916090b93eaac936ab9ac171fc12273588283f26ce2b73ac
+
+sensorless.cfg
+548fdaa7d19a0eaf5a943febe416bde97dd736987ecf7e2991a5bd61b0caa12c
+
+eddy_nozzle_clear.cfg
+5318022508d0a1a114e86ac8f4bfe7432ae3831ceb44d5be242dcf970a7661bf
+
+custom_macro.py
+b30722d58af3db0cad8db5248e9565338178cfa43ebe9e8eaddb39b2ed63a676
+
+box_wrapper.cpython-38-mipsel-linux-gnu.so
+3b4304ba7207740a4b6f8ded4bb73febb27490fe4731a07a7a2e6cd1814a9036
+```
+
+The reference printer's recovery tooling was also validated after the snapshot:
+
+- `compare-known-good.sh` verified 20 protected regular files and 2 symlinks;
+- `restore-known-good.sh` defaults to dry-run, requires an explicit confirmation
+  token for apply, checks idle/heater state, and creates a pre-restore backup;
+- an end-to-end destructive restore test was completed only against a disposable
+  shadow tree, where a changed file, missing file, and changed symlink were all
+  restored successfully;
+- `known-good-health.sh` provides the final one-command read-only health check;
+- the real printer remained byte-identical to the frozen baseline after those
+  tests and Klipper remained `ready`.
+
+These recovery scripts are reference-machine safety tooling; their hardcoded
+snapshot path is not a portable replacement for the repository installer.
+
 ## Platform
 
 - Creality K1 Max
@@ -144,8 +192,12 @@ OrcaSlicer custom purge
 ```
 
 The 2026-10-02 physical test print completed successfully, including the first
-layer and a real mid-print CFS tool change. The tested OrcaSlicer configuration
-is documented in `docs/ORCASLICER-CFS-GCODE.md`.
+layer and a real mid-print CFS tool change. The final 2026-10-05 regression
+reconfirmed the complete live START_PRINT path, normal CFS cutter/purge
+clearance, T0 -> T1 change, material flush, prime-tower continuation, and a
+fresh sliced file with zero `CFS_NOZZLE_CLEAR`, `CFS_NOZZLE_CLEAN`,
+`BOX_NOZZLE_CLEAN`, or `CX_PRINT_DRAW_ONE_LINE` commands. The tested
+OrcaSlicer configuration is documented in `docs/ORCASLICER-CFS-GCODE.md`.
 
 The physically validated post-test `gcode_macro.cfg` SHA256 is:
 
@@ -162,8 +214,14 @@ first CFS tool selection.
 - double `_HOME_Y` calls are intentional;
 - double `_HOME_X` calls are intentional;
 - `prtouch_v2` remains configured for Creality/CFS compatibility;
-- existing CFS behavior remains intact;
-- the validated nozzle-clean path remains intact.
+- the normal native CFS cutter, purge-chute, material-flush, and tool-change
+  behavior remains intact and was physically validated with the Eddy Duo mount;
+- the obsolete slicer-emitted `CFS_NOZZLE_CLEAR` / `CFS_NOZZLE_CLEAN`
+  side-brush path is intentionally absent because that route is physically
+  incompatible with the validated Eddy Duo mount;
+- a printer-side/manual `BOX_NOZZLE_CLEAN` helper may still exist in Creality's
+  CFS configuration, but it is not part of the validated normal native T0 -> T1
+  slicer path and must not be conflated with the removed `CFS_NOZZLE_*` path.
 
 ## Machine-specific values intentionally not shipped as defaults
 
