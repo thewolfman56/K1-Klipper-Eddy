@@ -1993,14 +1993,60 @@ def verify_production(args):
 
     def printer_ok(path):
         text = read_text(path)
+
+        def included_config_names(entry):
+            """Return config basenames reachable through Klipper include directives."""
+            config_root = p["config"]
+            pending = [Path(entry)]
+            seen = set()
+            names = set()
+            include_re = re.compile(
+                r"(?m)^\s*\[include\s+([^\]]+)\]\s*$"
+            )
+
+            while pending:
+                current = pending.pop()
+                try:
+                    current = current.resolve()
+                except OSError:
+                    current = Path(current)
+                if current in seen:
+                    continue
+                seen.add(current)
+
+                current_text = read_text(current)
+                if not current_text:
+                    continue
+
+                for match in include_re.finditer(current_text):
+                    pattern = match.group(1).strip()
+                    if not pattern:
+                        continue
+
+                    # Klipper config includes are relative to the config root.
+                    # Support normal files and glob patterns while staying
+                    # inside the printer config tree.
+                    try:
+                        matches = sorted(config_root.glob(pattern))
+                    except (OSError, ValueError):
+                        matches = []
+
+                    for child in matches:
+                        if child.is_file():
+                            names.add(child.name)
+                            pending.append(child)
+
+            return names
+
+        includes = included_config_names(path)
         return (
             re.search(
                 r"(?m)^\s*endstop_pin:\s*probe:z_virtual_endstop\s*$",
                 text,
             )
             is not None
-            and "[include btteddy_mcu.cfg]" in text
-            and "[include eddy_nozzle_clear.cfg]" in text
+            and "btteddy_mcu.cfg" in includes
+            and "eddy_nozzle_clear.cfg" in includes
         )
 
     def eddy_cfg_ok(path):
