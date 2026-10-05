@@ -1,0 +1,147 @@
+name: Publish v1.0.0
+
+on:
+  push:
+    branches:
+      - release-v1.0.0-publisher
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_SHA: bc1c528873bd864bb2530c218b2fd7c6cad27a85
+      TAG_NAME: v1.0.0
+      ZIP_NAME: K1-Klipper-Eddy-v1.0.0.zip
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out exact merged release commit
+        uses: actions/checkout@v4
+        with:
+          ref: bc1c528873bd864bb2530c218b2fd7c6cad27a85
+          fetch-depth: 0
+
+      - name: Verify exact source commit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Compile Python
+        run: |
+          python3 -m py_compile scripts/k1max_cfs_eddy.py
+          python3 -m py_compile klippy/extras/eddy_z_acquire.py
+
+      - name: Verify production Eddy source hashes
+        run: sha256sum -c tests/fixtures/validated_deployed_source_sha256.txt
+
+      - name: Run full installer and package test suite
+        run: python3 -m unittest -v tests.test_installer tests.test_release_package
+
+      - name: Build deterministic v1.0.0 release ZIP twice
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python3 scripts/build_release.py             --version v1.0.0             --output "dist/$ZIP_NAME"
+          python3 scripts/build_release.py             --version v1.0.0             --output "dist/$ZIP_NAME.second"
+          cmp -s "dist/$ZIP_NAME" "dist/$ZIP_NAME.second"
+          rm -f "dist/$ZIP_NAME.second"
+          sha256sum "dist/$ZIP_NAME" > "dist/$ZIP_NAME.sha256"
+
+      - name: Verify release ZIP manifest and required docs
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import zipfile
+
+          target = os.environ["TARGET_SHA"]
+          zip_name = os.environ["ZIP_NAME"]
+          path = "dist/" + zip_name
+          prefix = "K1-Klipper-Eddy-v1.0.0/"
+
+          required = {
+              prefix + "README.md",
+              prefix + "LICENSE",
+              prefix + "install.sh",
+              prefix + "scripts/k1max_cfs_eddy.py",
+              prefix + "docs/K1MAX-CFS-EDDY-DUO-23533.md",
+              prefix + "docs/ORCASLICER-CFS-GCODE.md",
+              prefix + "docs/VALIDATED-STATE.md",
+              prefix + "docs/RELEASE-CHECKLIST.md",
+              prefix + "docs/RELEASE-NOTES-v1.0.0.md",
+              prefix + "RELEASE-MANIFEST.json",
+          }
+
+          with zipfile.ZipFile(path) as zf:
+              names = set(zf.namelist())
+              missing = sorted(required - names)
+              if missing:
+                  raise SystemExit("Missing required release files: " + ", ".join(missing))
+              manifest = json.loads(
+                  zf.read(prefix + "RELEASE-MANIFEST.json").decode("utf-8")
+              )
+
+          assert manifest["version"] == "v1.0.0", manifest
+          assert manifest["target_firmware"] == "2.3.5.33", manifest
+          assert manifest["source_commit"] == target, manifest
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
+
+      - name: Create or verify v1.0.0 tag on exact merge commit
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+
+          deref="$(git ls-remote --tags origin "refs/tags/$TAG_NAME^{}" | awk '{print $1}')"
+          direct="$(git ls-remote --tags origin "refs/tags/$TAG_NAME" | awk '{print $1}')"
+
+          if [ -n "$deref" ]; then
+            existing="$deref"
+          else
+            existing="$direct"
+          fi
+
+          if [ -n "$existing" ] && [ "$existing" != "$TARGET_SHA" ]; then
+            echo "Tag $TAG_NAME already exists but points to $existing, expected $TARGET_SHA"
+            exit 1
+          fi
+
+          if [ -z "$existing" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG_NAME" "$TARGET_SHA"               -m "K1 Max + CFS + BTT Eddy Duo — CrealityOS 2.3.5.33"
+            git push origin "$TAG_NAME"
+          fi
+
+          git fetch --tags origin
+          test "$(git rev-list -n 1 "$TAG_NAME")" = "$TARGET_SHA"
+
+      - name: Publish GitHub Release and assets
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME"               "dist/$ZIP_NAME#Install ZIP"               "dist/$ZIP_NAME.sha256#SHA256"               --clobber               --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG_NAME"               "dist/$ZIP_NAME#Install ZIP"               "dist/$ZIP_NAME.sha256#SHA256"               --title "v1.0.0 — K1 Max + CFS + BTT Eddy Duo"               --notes-file docs/RELEASE-NOTES-v1.0.0.md               --verify-tag               --repo "$GITHUB_REPOSITORY"
+          fi
+
+      - name: Verify published release
+        run: |
+          set -euo pipefail
+
+          tag_target="$(git ls-remote --tags origin "refs/tags/$TAG_NAME^{}" | awk '{print $1}')"
+          if [ -z "$tag_target" ]; then
+            tag_target="$(git ls-remote --tags origin "refs/tags/$TAG_NAME" | awk '{print $1}')"
+          fi
+          test "$tag_target" = "$TARGET_SHA"
+
+          gh release view "$TAG_NAME"             --repo "$GITHUB_REPOSITORY"             --json name,tagName,isDraft,isPrerelease,publishedAt,url,assets
+
+          assets="$(gh release view "$TAG_NAME"             --repo "$GITHUB_REPOSITORY"             --json assets             --jq '.assets[].name')"
+
+          echo "$assets" | grep -Fx "$ZIP_NAME"
+          echo "$assets" | grep -Fx "$ZIP_NAME.sha256"
