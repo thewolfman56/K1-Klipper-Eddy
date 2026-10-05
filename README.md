@@ -5,6 +5,8 @@ This fork packages the **validated K1 Max + Creality CFS + BTT Eddy Duo** conver
 > **Validated target:** Creality **K1 Max**, official CFS upgrade path, **CrealityOS 2.3.5.33**, BTT Eddy Duo over USB, and the fixed CFS napkin-strip wipe described below.
 >
 > Other firmware revisions are **not claimed as compatible**. The helper stops on anything other than `2.3.5.33` unless `--force-unsupported` is deliberately supplied.
+>
+> **Recommended clean starting point:** begin with a **factory-reset or freshly reflashed official CrealityOS 2.3.5.33 installation** before rooting the printer or installing Helper Script/Klipper modifications. This is not strictly required for an already-clean, known installation, but it reduces the chance that old macros, probe files, Helper Script changes, or other customizations interfere with the validated installation path. A reset/reflash may erase configuration and user data, so preserve anything you need first and confirm the printer is actually running `2.3.5.33` before proceeding.
 
 ## Important safety, warranty, and liability notice
 
@@ -21,6 +23,14 @@ This fork packages the **validated K1 Max + Creality CFS + BTT Eddy Duo** conver
 > This project remains licensed under GPLv3. See [`LICENSE`](LICENSE), including its **NO WARRANTY** provisions.
 
 The project is derived from [`vsevolod-volkov/K1-Klipper-Eddy`](https://github.com/vsevolod-volkov/K1-Klipper-Eddy) and its SimpleAF-derived Eddy compatibility work. That repository is archived; this fork preserves GPLv3 licensing and adds the K1 Max/CFS/2.3.5.33 integration that was validated on a real printer.
+
+## Start here — one complete installation guide
+
+For a new installation, use **[START-HERE-COMPLETE-INSTALL.md](docs/START-HERE-COMPLETE-INSTALL.md)**.
+
+That document puts the entire supported procedure in one ordered walkthrough: clean 2.3.5.33 starting state, root/SSH, Entware/Git, required Creality Helper Script items, CFS verification, Eddy mounting and calibration, staging/activation, progressive homing tests, measured napkin wipe setup, exact OrcaSlicer Machine G-code, controlled print validation, backups, and the firmware-update audit workflow.
+
+The other documents in `docs/` remain available as deeper technical references and troubleshooting material, but they are **not required to be read in sequence** when following the Start Here guide.
 
 ## What the helper does
 
@@ -54,11 +64,13 @@ The napkin strip is not conductive, so Eddy **cannot measure the wipe surface di
 
 ## Fast path
 
-Read the full guide first: [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md).
+For the complete ordered install, follow **[`docs/START-HERE-COMPLETE-INSTALL.md`](docs/START-HERE-COMPLETE-INSTALL.md)** from top to bottom.
 
-Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) for the Entware/Git bootstrap commands and the supported/blocked Helper Script add-on matrix.
+The focused documents remain useful when you want additional detail about a specific subsystem:
 
-Before slicing a print, configure OrcaSlicer with the validated CFS startup and tool-change G-code in [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md). This is required so `START_PRINT` performs the Eddy-safe napkin wipe and leveling first, the slicer then loads the selected CFS filament, and the startup purge happens only after that load.
+- [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md) — Eddy/CFS installation internals and safety model;
+- [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) — full Helper Script compatibility matrix and optional add-ons;
+- [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md) — validated OrcaSlicer G-code and reference-slice analysis.
 
 > **Final reference regression (2026-10-05):** the normal CFS cutter/purge path,
 > initial T0 load, real T0 -> T1 change, material flush, and prime-tower
