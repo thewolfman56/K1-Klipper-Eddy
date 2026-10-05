@@ -485,6 +485,65 @@ gcode:
                 "Result: production safety profile accepted", out
             )
 
+    def test_verify_production_accepts_nested_printer_include_graph(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+            pairs = ",".join(
+                "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+                for i in range(60)
+            )
+            pending = root / "pending.json"
+            pending.write_text(json.dumps({
+                "probe_eddy_current btt_eddy": {
+                    "reg_drive_current": "16",
+                    "calibrate": pairs,
+                }
+            }))
+            self.run_helper(
+                root, "persist", "--pending-json", str(pending)
+            )
+            self.run_helper(root, "activate")
+            self.run_helper(
+                root, "configure-wipe",
+                "--start-x", "70.5", "--start-y", "305.5",
+                "--start-surface-z", "4.2",
+                "--end-x", "90.5", "--end-y", "305.5",
+                "--end-surface-z", "4.35",
+                "--confirm-measured",
+            )
+
+            cfg = root / "usr/data/printer_data/config"
+            printer = cfg / "printer.cfg"
+            printer_text = printer.read_text()
+            printer_text = printer_text.replace(
+                "[include btteddy_mcu.cfg]\n", ""
+            )
+            printer_text = printer_text.replace(
+                "[include eddy_nozzle_clear.cfg]\n", ""
+            )
+            printer_text += "\n[include nested-release.cfg]\n"
+            printer.write_text(printer_text)
+
+            (cfg / "nested-release.cfg").write_text(
+                "[include btteddy_mcu.cfg]\n"
+                "[include nested-macros.cfg]\n"
+            )
+            (cfg / "nested-macros.cfg").write_text(
+                "[include eddy_nozzle_clear.cfg]\n"
+            )
+
+            out = self.run_helper(root, "verify-production").stdout
+            self.assertIn("EXPECTED CUSTOM printer.cfg:", out)
+            self.assertIn("0 DRIFT", out)
+            self.assertIn(
+                "Result: production safety profile accepted", out
+            )
+
     def test_verify_production_returns_nonzero_on_safety_drift(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
