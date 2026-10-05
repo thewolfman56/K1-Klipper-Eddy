@@ -81,6 +81,47 @@ Production `sensorless.cfg` SHA256:
 
 The public repository locks the exact recovered production homing-safety sections in CI.
 
+### Final operational baseline — 2026-10-05
+
+After the installer/source baseline was established, the reference printer
+completed a final end-to-end regression and was frozen again at:
+
+```text
+/usr/data/printer_data/backups/K1Max-CFS-BTT-Eddy-known-good-20261005-133356
+```
+
+The frozen snapshot passed a complete SHA256 manifest verification. Key exact
+reference hashes include:
+
+```text
+gcode_macro.cfg
+64c133a15c7b33fb916090b93eaac936ab9ac171fc12273588283f26ce2b73ac
+
+sensorless.cfg
+548fdaa7d19a0eaf5a943febe416bde97dd736987ecf7e2991a5bd61b0caa12c
+
+eddy_nozzle_clear.cfg
+5318022508d0a1a114e86ac8f4bfe7432ae3831ceb44d5be242dcf970a7661bf
+
+custom_macro.py
+b30722d58af3db0cad8db5248e9565338178cfa43ebe9e8eaddb39b2ed63a676
+```
+
+The final regression physically validated the normal CFS cutter and purge
+paths, initial T0 load, T0 -> T1 material change, material flush, and
+prime-tower continuation with the Eddy Duo mount.
+
+The obsolete slicer-emitted side-brush commands are intentionally excluded:
+
+```text
+CFS_NOZZLE_CLEAR
+CFS_NOZZLE_CLEAN
+```
+
+The final reference slice also contained no standalone `BOX_NOZZLE_CLEAN` and
+no `CX_PRINT_DRAW_ONE_LINE`. Exact OrcaSlicer Machine Start and Change
+Filament G-code is documented in `docs/ORCASLICER-CFS-GCODE.md`.
+
 ## Installation paths
 
 ### Git / Entware
