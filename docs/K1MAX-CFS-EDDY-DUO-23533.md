@@ -256,20 +256,41 @@ Expected state:
 - pre-Z-home Eddy clearance guard present;
 - fixed napkin wipe configured.
 
-Then validate the full CFS print path. The known-good machine completed:
+Then configure OrcaSlicer exactly as documented in
+[`ORCASLICER-CFS-GCODE.md`](ORCASLICER-CFS-GCODE.md) and validate the full CFS
+print path. The final known-good machine completed:
 
 ```text
-BOX_START_PRINT
+START_PRINT
+  → BOX_START_PRINT
   → CX_ROUGH_G28
   → protected G28
   → CX_NOZZLE_CLEAR
-  → fixed-height napkin wipe
+  → fixed-height Eddy-safe napkin wipe
   → ACCURATE_G28 (second Z skipped for Eddy)
   → CX_PRINT_LEVELING_CALIBRATION
   → CHECK_BED_MESH
-  → 20×20 rapid_scan
-  → CX_PRINT_DRAW_ONE_LINE
+  → 20×20 / 400-point rapid_scan
+  → return to OrcaSlicer WITHOUT CX_PRINT_DRAW_ONE_LINE
+T{current_extruder}
+  → selected CFS filament loads
+M109 S[first-layer temperature]
+  → nozzle returns to print temperature
+OrcaSlicer custom purge
+  → purge runs only after the selected filament is loaded
 ```
+
+The sliced startup G-code must not reintroduce the obsolete side-brush path:
+
+```text
+CFS_NOZZLE_CLEAR
+CFS_NOZZLE_CLEAN
+```
+
+The validated reference slice also contained no standalone `BOX_NOZZLE_CLEAN`
+and no `CX_PRINT_DRAW_ONE_LINE`. The normal native CFS cutter, purge-chute,
+material-flush, and T0 -> T1 paths were physically validated with the Eddy Duo
+mount.
 
 ## 13. Rollback
 
