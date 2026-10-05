@@ -42,7 +42,10 @@ class ReleasePackageTest(unittest.TestCase):
                     prefix + "config/btteddy.cfg",
                     prefix + "docs/K1MAX-CFS-EDDY-DUO-23533.md",
                     prefix + "docs/CREALITY-HELPER-SCRIPT.md",
+                    prefix + "docs/ORCASLICER-CFS-GCODE.md",
+                    prefix + "docs/VALIDATED-STATE.md",
                     prefix + "docs/RELEASE-CHECKLIST.md",
+                    prefix + "docs/RELEASE-NOTES-v1.0.0.md",
                     prefix + "RELEASE-MANIFEST.json",
                 }
                 self.assertTrue(required.issubset(set(names)))
