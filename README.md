@@ -46,6 +46,15 @@ Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER
 
 Before slicing a print, configure OrcaSlicer with the validated CFS startup and tool-change G-code in [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md). This is required so `START_PRINT` performs the Eddy-safe napkin wipe and leveling first, the slicer then loads the selected CFS filament, and the startup purge happens only after that load.
 
+> **Final reference regression (2026-10-05):** the normal CFS cutter/purge path,
+> initial T0 load, real T0 -> T1 change, material flush, and prime-tower
+> continuation were physically validated with the mounted Eddy Duo. The frozen
+> reference snapshot is
+> `/usr/data/printer_data/backups/K1Max-CFS-BTT-Eddy-known-good-20261005-133356`.
+> The obsolete slicer-emitted `CFS_NOZZLE_CLEAR` / `CFS_NOZZLE_CLEAN`
+> side-brush path is intentionally excluded; a fresh slice must also not
+> reintroduce `CX_PRINT_DRAW_ONE_LINE`.
+
 Validated optional Helper Script add-ons on the reference machine include **Improved Shapers Calibrations, Moonraker Timelapse, Camera Settings Control, OctoEverywhere, and Mobileraker Companion**. OctoEverywhere and Mobileraker required the K1-specific stock-Python/service-wrapper fixes documented in that guide.
 
 `sh install.sh doctor` now audits those optional components without changing them. It reports `PASS`, `INFO`, or `WARN` for Camera Settings Control, OctoEverywhere, and Mobileraker, including stock-vs-Entware Python, K1 `exec` wrappers, process counts, and PID-file consistency.
