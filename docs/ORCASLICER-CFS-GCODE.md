@@ -13,7 +13,11 @@ Validated on the reference printer with:
 - fixed Eddy-safe CFS napkin-strip wipe
 
 The physical regression on 2026-10-02 completed the corrected startup purge,
-first layer, and a real mid-print CFS tool change successfully.
+first layer, and a real mid-print CFS tool change successfully. A final
+2026-10-05 regression then re-audited the generated G-code, the live
+START_PRINT chain, the normal CFS cutter/purge path, T0 -> T1 tool change, and
+the prime-tower continuation before freezing the production-known-good
+baseline.
 
 ## Why this slicer configuration is required
 
@@ -33,7 +37,12 @@ This project patches `START_PRINT` during `activate` so that:
 
 Do **not** add `CX_PRINT_DRAW_ONE_LINE` back to the slicer profile.
 
-The legacy/stale `CFS_NOZZLE_CLEAR` command is also not used by this profile.
+The legacy/stale `CFS_NOZZLE_CLEAR` and `CFS_NOZZLE_CLEAN` side-brush
+commands are not used by this profile. On the validated Eddy Duo mount, that
+old side-brush route is physically incompatible with the probe/mount geometry
+and must stay out of sliced G-code. This is separate from Creality's normal
+native CFS cutter and purge-chute path, which was physically validated during
+the successful tool-change print.
 
 ## Machine Start G-code
 
@@ -118,8 +127,14 @@ The generated file should contain **no**:
 
 ```gcode
 CFS_NOZZLE_CLEAR
+CFS_NOZZLE_CLEAN
 CX_PRINT_DRAW_ONE_LINE
 ```
+
+The validated reference slice also emitted no standalone `BOX_NOZZLE_CLEAN`
+command. A printer-side/manual helper with that name may still exist in
+Creality's CFS configuration; do not confuse that helper with the obsolete
+slicer-emitted `CFS_NOZZLE_*` side-brush path.
 
 `CX_NOZZLE_CLEAR` still exists on the printer and is called internally by
 `START_PRINT`; it should not appear as a separate slicer command.
@@ -149,9 +164,52 @@ OrcaSlicer may emit another identical `T0`/`T1` after its initial
 tool-change positioning. On the validated Creality CFS wrapper an immediate
 same-tool command is a no-op; the physical regression confirmed that behavior.
 
+## Final validated reference slice
+
+The final audited reference G-code on the printer was:
+
+```text
+Mini Halloween Pumpkin - Single 3 color_PLA_11m42s.gcode
+SHA256 9bfd7adc514f2df839489425f1d09347c87a75d0fa2e26b027808ce1481b02bb
+```
+
+Despite the filename, the executable tool sequence in that file was only:
+
+```text
+T0
+T0
+T1
+```
+
+The first-tool path was:
+
+```text
+start_print EXTRUDER_TEMP=230 BED_TEMP=60 CHAMBER_TEMP=0
+T0
+M109 S230
+...
+T0
+SET_ACTIVE_SPOOL ID=33
+```
+
+and the real color change was:
+
+```text
+M104 S230
+...
+T1
+SET_ACTIVE_SPOOL ID=3
+...
+prime tower / wipe continuation
+```
+
+The `SET_ACTIVE_SPOOL` IDs above belong to the reference printer's filament
+profiles and are **not portable defaults**. Keep your own spool IDs in Orca's
+filament start G-code.
+
 ## Physical validation completed
 
-The final test print confirmed:
+The final physical/regression validation confirmed:
 
 - the napkin-strip wipe occurs during `START_PRINT`;
 - no Creality purge line occurs before the CFS load;
@@ -159,7 +217,13 @@ The final test print confirmed:
 - `M109` restores the requested first-layer nozzle temperature;
 - the custom Orca purge runs after the CFS load;
 - the first layer starts at the correct Z;
-- a real mid-print CFS tool change completes and printing resumes.
+- the normal CFS cutter path clears the Eddy Duo mount;
+- the normal CFS purge-chute/flush path clears the Eddy Duo mount;
+- a real T0 -> T1 mid-print CFS tool change completes;
+- prime-tower/wipe continuation resumes normally after the tool change;
+- the obsolete `CFS_NOZZLE_CLEAR` / `CFS_NOZZLE_CLEAN` side-brush path is
+  absent from the generated G-code.
+
 
 Always reslice after changing printer Machine G-code; previously generated
 G-code files retain the old startup sequence.
