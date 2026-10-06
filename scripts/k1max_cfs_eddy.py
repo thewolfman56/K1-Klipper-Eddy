@@ -856,6 +856,107 @@ def section_core(text, header):
     return "".join(lines[start:end]).rstrip("\n")
 
 
+def eddy_temperature_state(path, text=None):
+    """Return presence/validity for the two BTT Eddy USB temperature objects."""
+    if text is None:
+        text = read_text(path)
+
+    mcu = section_core(text, "[temperature_sensor btt_eddy_mcu]")
+    probe = section_core(text, "[temperature_probe btt_eddy]")
+
+    mcu_valid = (
+        mcu is not None
+        and re.search(r"(?m)^\s*sensor_type:\s*temperature_mcu\s*$", mcu)
+        is not None
+        and re.search(r"(?m)^\s*sensor_mcu:\s*eddy\s*$", mcu)
+        is not None
+    )
+    probe_valid = (
+        probe is not None
+        and re.search(r"(?m)^\s*sensor_type:\s*Generic 3950\s*$", probe)
+        is not None
+        and re.search(r"(?m)^\s*sensor_pin:\s*eddy:gpio26\s*$", probe)
+        is not None
+    )
+
+    return {
+        "mcu_present": mcu is not None,
+        "mcu_valid": mcu_valid,
+        "probe_present": probe is not None,
+        "probe_valid": probe_valid,
+    }
+
+
+def upgrade_eddy_temperatures(args):
+    """Add Eddy USB probe/MCU temperature objects without touching calibration."""
+    doctor(args, write=True)
+    p = printer_paths(args.root)
+    path = p["eddy_cfg"]
+
+    if not path.exists():
+        raise Stop("btteddy_mcu.cfg is missing; nothing to upgrade.")
+
+    text = read_text(path)
+    if "[mcu eddy]" not in text:
+        raise Stop("Missing [mcu eddy] in btteddy_mcu.cfg; refusing to guess MCU routing.")
+    if "[probe_eddy_current btt_eddy]" not in text:
+        raise Stop(
+            "Missing [probe_eddy_current btt_eddy] in btteddy_mcu.cfg; "
+            "refusing to modify an unknown Eddy layout."
+        )
+
+    state = eddy_temperature_state(path, text)
+    if state["mcu_present"] and not state["mcu_valid"]:
+        raise Stop(
+            "Existing [temperature_sensor btt_eddy_mcu] does not use "
+            "sensor_type temperature_mcu with sensor_mcu eddy; review it manually."
+        )
+    if state["probe_present"] and not state["probe_valid"]:
+        raise Stop(
+            "Existing [temperature_probe btt_eddy] does not use Generic 3950 "
+            "on eddy:gpio26; review it manually."
+        )
+
+    additions = []
+    if not state["mcu_present"]:
+        additions.append("""[temperature_sensor btt_eddy_mcu]
+sensor_type: temperature_mcu
+sensor_mcu: eddy
+min_temp: 0
+max_temp: 105""")
+    if not state["probe_present"]:
+        temperature_probe_py = p["extras"] / "temperature_probe.py"
+        if not temperature_probe_py.exists():
+            raise Stop(
+                "Klipper temperature_probe support is missing: %s"
+                % temperature_probe_py
+            )
+        additions.append("""[temperature_probe btt_eddy]
+sensor_type: Generic 3950
+sensor_pin: eddy:gpio26
+horizontal_move_z: 2.0""")
+
+    if not additions:
+        print("Eddy temperature upgrade already present; no files changed.")
+        return
+
+    backup(args, "pre-temperature-upgrade")
+    upgraded = text.rstrip() + "\n\n" + "\n\n".join(additions) + "\n"
+    atomic_write(path, upgraded)
+
+    after = eddy_temperature_state(path)
+    if not (after["mcu_valid"] and after["probe_valid"]):
+        raise Stop(
+            "Temperature sections were written but did not validate; "
+            "restore the pre-temperature-upgrade backup before restarting."
+        )
+
+    print("BTT Eddy temperature upgrade written to %s." % path)
+    print("Preserved the existing Eddy probe section and calibration data.")
+    print("No service restart, G-code, heating, probing, or motion command was sent.")
+    print("Review the diff, then issue FIRMWARE_RESTART in Fluidd.")
+
+
 def pre_xy_block(text):
     block = section_core(text, "[homing_override]")
     if block is None:
@@ -1389,6 +1490,7 @@ def status(args):
     printer = read_text(p["printer"])
     sensorless = read_text(p["sensorless"])
     macros = read_text(p["eddy_macros"])
+    temperatures = eddy_temperature_state(p["eddy_cfg"])
     native = bool(re.search(r"(?m)^\s*endstop_pin:\s*probe:z_virtual_endstop\s*$", printer))
 
     sensorless_hash = (
@@ -1409,6 +1511,14 @@ def status(args):
     print("Eddy config:           %s" % ("present" if p["eddy_cfg"].exists() else "missing"))
     print("Drive current:         %s" % (reg or "missing"))
     print("Height-map points:     %d" % points)
+    print(
+        "Eddy probe temp:       %s"
+        % ("present" if temperatures["probe_valid"] else "missing/invalid")
+    )
+    print(
+        "Eddy MCU temp:         %s"
+        % ("present" if temperatures["mcu_valid"] else "missing/invalid")
+    )
     print("Native Eddy Z:         %s" % ("ACTIVE" if native else "not active"))
     print("Pre-XY Eddy check:     %s" % ("present" if "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2" in sensorless else ("validated by exact production file" if exact_sensorless else "missing")))
     print(
@@ -2216,6 +2326,7 @@ def build_parser():
     sub.add_parser("doctor")
     sub.add_parser("backup")
     sub.add_parser("status")
+    sub.add_parser("upgrade-temperatures")
     sub.add_parser("verify-production")
     sub.add_parser("release-readiness")
 
@@ -2273,6 +2384,8 @@ def main():
             configure_wipe(args)
         elif args.command == "status":
             status(args)
+        elif args.command == "upgrade-temperatures":
+            upgrade_eddy_temperatures(args)
         elif args.command == "verify-production":
             return verify_production(args)
         elif args.command == "release-readiness":

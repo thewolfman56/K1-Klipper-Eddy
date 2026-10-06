@@ -37,6 +37,24 @@ def section_core(text, header):
     return "".join(lines[start:end]).rstrip("\n") + "\n"
 
 
+def remove_section(text, header):
+    lines = text.splitlines(True)
+    start = None
+    end = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip() == header:
+            start = i
+            break
+    if start is None:
+        return text
+    for i in range(start + 1, len(lines)):
+        s = lines[i].strip()
+        if s.startswith("[") and s.endswith("]"):
+            end = i
+            break
+    return "".join(lines[:start] + lines[end:])
+
+
 def pre_xy_block(text):
     block = section_core(text, "[homing_override]")
     first = "  {% if x_axes is not defined or x_axes[2] is not defined %}"
@@ -370,6 +388,112 @@ def get_printer_mcu(printer, name):
                 "EDDY_HOME_STATUS SAMPLES=50 TIMEOUT=2",
                 sensorless,
             )
+
+    def test_upgrade_temperatures_preserves_existing_eddy_calibration(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.make_root(root)
+
+            self.run_helper(
+                root, "stage", "--x-offset", "-23", "--y-offset", "0"
+            )
+
+            pairs = ",".join(
+                "%.3f:%.3f" % (0.05 + i * 0.04, 3000000 - i * 1000)
+                for i in range(60)
+            )
+            pending = root / "pending.json"
+            pending.write_text(json.dumps({
+                "probe_eddy_current btt_eddy": {
+                    "reg_drive_current": "16",
+                    "calibrate": pairs,
+                }
+            }))
+            self.run_helper(
+                root, "persist", "--pending-json", str(pending)
+            )
+
+            cfg = (
+                root
+                / "usr/data/printer_data/config/btteddy_mcu.cfg"
+            )
+            legacy = cfg.read_text()
+            legacy = remove_section(
+                legacy, "[temperature_sensor btt_eddy_mcu]"
+            )
+            legacy = remove_section(
+                legacy, "[temperature_probe btt_eddy]"
+            )
+            probe_before = section_core(
+                legacy, "[probe_eddy_current btt_eddy]"
+            )
+            cfg.write_text(legacy)
+
+            before_status = self.run_helper(root, "status").stdout
+            self.assertIn(
+                "Eddy probe temp:       missing/invalid", before_status
+            )
+            self.assertIn(
+                "Eddy MCU temp:         missing/invalid", before_status
+            )
+
+            out = self.run_helper(
+                root, "upgrade-temperatures"
+            ).stdout
+            self.assertIn(
+                "BTT Eddy temperature upgrade written", out
+            )
+            self.assertIn(
+                "Preserved the existing Eddy probe section "
+                "and calibration data.",
+                out,
+            )
+
+            upgraded = cfg.read_text()
+            self.assertIn(
+                "[temperature_sensor btt_eddy_mcu]", upgraded
+            )
+            self.assertIn("sensor_type: temperature_mcu", upgraded)
+            self.assertIn("sensor_mcu: eddy", upgraded)
+            self.assertIn("[temperature_probe btt_eddy]", upgraded)
+            self.assertIn("sensor_type: Generic 3950", upgraded)
+            self.assertIn("sensor_pin: eddy:gpio26", upgraded)
+            self.assertEqual(
+                section_core(
+                    upgraded, "[probe_eddy_current btt_eddy]"
+                ),
+                probe_before,
+            )
+            self.assertIn("reg_drive_current: 16", upgraded)
+            self.assertIn("calibrate:", upgraded)
+
+            after_status = self.run_helper(root, "status").stdout
+            self.assertIn(
+                "Eddy probe temp:       present", after_status
+            )
+            self.assertIn(
+                "Eddy MCU temp:         present", after_status
+            )
+
+            backups = sorted(
+                (
+                    root / "usr/data/k1max-cfs-eddy-backups"
+                ).glob("*-pre-temperature-upgrade*")
+            )
+            self.assertEqual(len(backups), 1)
+
+            second = self.run_helper(
+                root, "upgrade-temperatures"
+            ).stdout
+            self.assertIn(
+                "already present; no files changed", second
+            )
+            backups_after = sorted(
+                (
+                    root / "usr/data/k1max-cfs-eddy-backups"
+                ).glob("*-pre-temperature-upgrade*")
+            )
+            self.assertEqual(len(backups_after), 1)
 
     def test_exact_production_hash_overrides_reconstructed_sensorless_contract(self):
         with tempfile.TemporaryDirectory() as td:
