@@ -229,6 +229,48 @@ cd K1-Klipper-Eddy
 
 If `/usr/data/K1-Klipper-Eddy` already exists from an earlier attempt, inspect or remove it intentionally instead of overwriting it blindly.
 
+### Existing working installation — add the Eddy temperature graphs
+
+Fresh installs created by the current helper already include both Eddy temperature objects. An older working installation may have the calibrated Eddy probe but lack the graphable temperature objects.
+
+After updating the repository to a version that contains the migration command, run:
+
+~~~sh
+cd /usr/data/K1-Klipper-Eddy
+sh install.sh status
+sh install.sh upgrade-temperatures
+~~~
+
+The migration is intentionally narrow:
+
+- it requires the existing `[mcu eddy]` and `[probe_eddy_current btt_eddy]` layout;
+- it creates a helper rollback backup before changing the config;
+- it does **not** rewrite the Eddy probe section, drive current, calibration curve, offsets, Z routing, homing macros, CFS macros, or wipe configuration;
+- it adds only missing `[temperature_sensor btt_eddy_mcu]` and `[temperature_probe btt_eddy]` sections;
+- it refuses to overwrite a conflicting existing temperature section;
+- running it again after a successful upgrade makes no change.
+
+Review `/usr/data/printer_data/config/btteddy_mcu.cfg`, then in Fluidd issue:
+
+~~~text
+FIRMWARE_RESTART
+~~~
+
+Verify:
+
+~~~sh
+sh install.sh status
+~~~
+
+Expected status lines:
+
+~~~text
+Eddy probe temp:       present
+Eddy MCU temp:         present
+~~~
+
+Fluidd can then expose **BTT Eddy** and **BTT Eddy MCU** as temperature traces/cards. This upgrade does not require Eddy drive-current or height-map recalibration because the calibrated `[probe_eddy_current btt_eddy]` section is preserved.
+
 ## Step 11 — Run the read-only preflight
 
 ~~~sh
