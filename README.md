@@ -104,6 +104,14 @@ Once `sh install.sh status` shows a drive current and a populated height map:
 sh install.sh activate
 ```
 
+For an existing working Eddy installation that predates the temperature objects, add the two Fluidd graph sensors without touching the probe calibration:
+
+```sh
+sh install.sh upgrade-temperatures
+```
+
+The command creates a rollback backup only when a change is needed, preserves the existing `[probe_eddy_current btt_eddy]` section byte-for-byte, and adds only the missing `[temperature_sensor btt_eddy_mcu]` and `[temperature_probe btt_eddy]` sections. Review the config, then issue `FIRMWARE_RESTART` from Fluidd. Running the command again is a no-op.
+
 After reviewing the changes, issue `FIRMWARE_RESTART`, validate homing, then measure the CFS napkin strip and install its fixed wipe path:
 
 ```sh
@@ -155,7 +163,8 @@ The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and recheck
 | `persist` | Save only pending Eddy calibration values into `btteddy_mcu.cfg` |
 | `activate` | Enable native Eddy Z and the validated homing/CFS safety routing |
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
-| `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
+| `status` | Show firmware, calibration, Eddy probe/MCU temperature-object state, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
+| `upgrade-temperatures` | Back up and add missing Eddy probe/MCU temperature objects to an existing install without rewriting probe calibration; safe to run repeatedly |
 | `verify-production` | Read-only comparison against the final production snapshot; reports `EXACT`, `EXPECTED CUSTOM`, or `DRIFT` and exits nonzero on drift |
 | `release-readiness` | Read-only aggregate PASS/WARN/INFO/FAIL release audit across firmware, calibration, homing safety, native Z, wipe, compatibility sources, optional add-ons, update-snapshot readiness, and repository integrity |
 | `pre-update-snapshot` | Verify the working installation, then preserve the full printer config and update-sensitive Klipper/service files before a firmware update |
