@@ -1,6 +1,6 @@
-# v1.0.0 release checklist — K1 Max + CFS + BTT Eddy Duo
+# v1.0.2 release checklist — K1 Max + CFS + BTT Eddy Duo
 
-> Status updated 2026-10-05 from the completed reference-printer regression, recovery validation, documentation audit, and GitHub Actions. Unchecked items are deliberate remaining pre-tag gates.
+> Status updated 2026-10-05 from the completed reference-printer regression, recovery validation, documentation audit, GitHub Actions, and the live v1.0.2 Eddy temperature-migration validation. Unchecked items are deliberate remaining pre-tag gates.
 
 This checklist defines the release gate for the **CrealityOS 2.3.5.33** supported profile.
 
@@ -17,6 +17,7 @@ A green GitHub Actions run is necessary but not sufficient. The physical-printer
   - `klippy/extras/eddy_z_acquire.py`
 - [x] Exact deployed-source hash fixture passes.
 - [x] Synthetic stage → persist → activate → wipe → rollback test passes.
+- [x] Eddy temperature migration regression preserves probe calibration and is idempotent.
 - [x] Optional add-on good/risky-state tests pass.
 - [x] Production verifier accepted/drift tests pass.
 - [x] Firmware-update snapshot/audit tests pass.
@@ -45,6 +46,8 @@ Required core state:
 - [x] One Eddy USB device is uniquely detected.
 - [x] Eddy drive-current calibration is persisted.
 - [x] Eddy height map is populated.
+- [x] Eddy probe temperature object is present and reports live data after restart.
+- [x] Eddy MCU temperature object is present and reports live data after restart.
 - [x] `[stepper_z]` uses `probe:z_virtual_endstop`.
 - [x] Fixed CFS napkin wipe is configured for this printer.
 - [x] Production homing safety contract reports `PASS`.
@@ -183,7 +186,7 @@ sh install.sh pre-update-snapshot
 - [x] Snapshot records the relevant Klipper/service paths.
 - [x] Rollback has already passed the synthetic CI test.
 - [x] Documentation clearly says **not** to restore old `.33` Klipper files blindly onto future firmware.
-- [x] `docs/RELEASE-NOTES-v1.0.0.md` matches the final supported profile and known limitations.
+- [x] `docs/RELEASE-NOTES-v1.0.2.md` matches the final supported profile, migration behavior, and known limitations.
 
 ## 9. Documentation gate
 
@@ -203,26 +206,27 @@ sh install.sh pre-update-snapshot
 
 Only after the checklist above is satisfied:
 
-1. Convert PR #1 from draft to ready for review.
-2. Merge to `main`.
-3. Tag the exact validated merge commit:
+1. Confirm PR #2 is ready for review, mergeable, and green on the exact release-candidate head.
+2. Merge PR #2 into `main`.
+3. Reconcile the 2.3.5.33 release branch through PR #3; it must contain the same validated v1.0.2 content with no unrelated release-only drift.
+4. Tag the exact promoted release commit:
 
 ```sh
-git tag -a v1.0.0 -m "K1 Max + CFS + BTT Eddy Duo — CrealityOS 2.3.5.33"
-git push origin v1.0.0
+git tag -a v1.0.2 -m "K1 Max + CFS + BTT Eddy Duo — CrealityOS 2.3.5.33"
+git push release v1.0.2
 ```
 
-4. Build the deterministic printer-install ZIP:
+5. Build the deterministic printer-install ZIP:
 
 ```sh
 python3 scripts/build_release.py \
-  --version v1.0.0 \
-  --output dist/K1-Klipper-Eddy-v1.0.0.zip
+  --version v1.0.2 \
+  --output dist/K1-Klipper-Eddy-v1.0.2.zip
 ```
 
-5. Create the GitHub release from `v1.0.0`.
-6. Attach `dist/K1-Klipper-Eddy-v1.0.0.zip` for printers where Git is unavailable or intentionally not installed.
-7. State prominently in the release notes that **v1.0.0 is validated only for CrealityOS 2.3.5.33**.
-8. Keep the production snapshot/checksums and safety limitations in the release notes.
+6. Create the GitHub release from `v1.0.2`.
+7. Attach `dist/K1-Klipper-Eddy-v1.0.2.zip` for printers where Git is unavailable or intentionally not installed.
+8. State prominently in the release notes that **v1.0.2 is validated only for CrealityOS 2.3.5.33** and that the temperature migration does not automatically enable thermal-drift compensation.
+9. Keep the production snapshot/checksums and safety limitations in the release notes.
 
 Do not mark a later Creality firmware as supported until its changed Klipper/CFS files have gone through the same audit and physical regression process.

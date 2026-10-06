@@ -5,8 +5,32 @@ This fork packages the **validated K1 Max + Creality CFS + BTT Eddy Duo** conver
 > **Validated target:** Creality **K1 Max**, official CFS upgrade path, **CrealityOS 2.3.5.33**, BTT Eddy Duo over USB, and the fixed CFS napkin-strip wipe described below.
 >
 > Other firmware revisions are **not claimed as compatible**. The helper stops on anything other than `2.3.5.33` unless `--force-unsupported` is deliberately supplied.
+>
+> **Recommended clean starting point:** begin with a **factory-reset or freshly reflashed official CrealityOS 2.3.5.33 installation** before rooting the printer or installing Helper Script/Klipper modifications. This is not strictly required for an already-clean, known installation, but it reduces the chance that old macros, probe files, Helper Script changes, or other customizations interfere with the validated installation path. A reset/reflash may erase configuration and user data, so preserve anything you need first and confirm the printer is actually running `2.3.5.33` before proceeding.
+
+## Important safety, warranty, and liability notice
+
+> **Use this project entirely at your own risk.** This is an unofficial community project and is not supported, endorsed, or warranted by Creality, BIGTREETECH, or any other printer or hardware manufacturer.
+>
+> This repository modifies a rooted printer's configuration and Klipper environment, including homing, probing, Z-axis behavior, bed meshing, nozzle wiping, and CFS-related workflows. Differences in hardware, assembly, probe mounting, calibration, firmware, slicer settings, or user-entered measurements can cause unexpected motion or failures, including nozzle/bed/probe collisions, toolhead crashes, damaged electronics or mechanical parts, failed prints, data loss, or other property damage.
+>
+> **You are responsible for deciding whether these modifications are appropriate for your printer, making and verifying your own backups, checking every machine-specific value, validating motion carefully, and maintaining immediate access to printer power during first-use testing.**
+>
+> To the maximum extent permitted by applicable law, the repository owner and contributors provide this project **without warranty** and are **not responsible or liable for damage to your printer or other property, personal injury, loss of data, loss of use, failed prints, downtime, or other losses arising from use or misuse of this repository.**
+>
+> Rooting the printer, replacing or modifying firmware/configuration files, installing third-party hardware, or otherwise altering the machine **may affect or void manufacturer warranty or service eligibility**. Warranty rights vary by manufacturer, seller, jurisdiction, and applicable consumer-protection law. You are responsible for reviewing the terms that apply to your printer before proceeding.
+>
+> This project remains licensed under GPLv3. See [`LICENSE`](LICENSE), including its **NO WARRANTY** provisions.
 
 The project is derived from [`vsevolod-volkov/K1-Klipper-Eddy`](https://github.com/vsevolod-volkov/K1-Klipper-Eddy) and its SimpleAF-derived Eddy compatibility work. That repository is archived; this fork preserves GPLv3 licensing and adds the K1 Max/CFS/2.3.5.33 integration that was validated on a real printer.
+
+## Start here — one complete installation guide
+
+For a new installation, use **[START-HERE-COMPLETE-INSTALL.md](docs/START-HERE-COMPLETE-INSTALL.md)**.
+
+That document puts the entire supported procedure in one ordered walkthrough: clean 2.3.5.33 starting state, root/SSH, Entware/Git, required Creality Helper Script items, CFS verification, Eddy mounting and calibration, staging/activation, progressive homing tests, measured napkin wipe setup, exact OrcaSlicer Machine G-code, controlled print validation, backups, and the firmware-update audit workflow.
+
+The other documents in `docs/` remain available as deeper technical references and troubleshooting material, but they are **not required to be read in sequence** when following the Start Here guide.
 
 ## What the helper does
 
@@ -40,11 +64,13 @@ The napkin strip is not conductive, so Eddy **cannot measure the wipe surface di
 
 ## Fast path
 
-Read the full guide first: [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md).
+For the complete ordered install, follow **[`docs/START-HERE-COMPLETE-INSTALL.md`](docs/START-HERE-COMPLETE-INSTALL.md)** from top to bottom.
 
-Before using the Creality Helper Script on 2.3.5.33, read [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) for the Entware/Git bootstrap commands and the supported/blocked Helper Script add-on matrix.
+The focused documents remain useful when you want additional detail about a specific subsystem:
 
-Before slicing a print, configure OrcaSlicer with the validated CFS startup and tool-change G-code in [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md). This is required so `START_PRINT` performs the Eddy-safe napkin wipe and leveling first, the slicer then loads the selected CFS filament, and the startup purge happens only after that load.
+- [`docs/K1MAX-CFS-EDDY-DUO-23533.md`](docs/K1MAX-CFS-EDDY-DUO-23533.md) — Eddy/CFS installation internals and safety model;
+- [`docs/CREALITY-HELPER-SCRIPT.md`](docs/CREALITY-HELPER-SCRIPT.md) — full Helper Script compatibility matrix and optional add-ons;
+- [`docs/ORCASLICER-CFS-GCODE.md`](docs/ORCASLICER-CFS-GCODE.md) — validated OrcaSlicer G-code and reference-slice analysis.
 
 > **Final reference regression (2026-10-05):** the normal CFS cutter/purge path,
 > initial T0 load, real T0 -> T1 change, material flush, and prime-tower
@@ -77,6 +103,14 @@ Once `sh install.sh status` shows a drive current and a populated height map:
 ```sh
 sh install.sh activate
 ```
+
+For an existing working Eddy installation that predates the temperature objects, add the two Fluidd graph sensors without touching the probe calibration:
+
+```sh
+sh install.sh upgrade-temperatures
+```
+
+The command creates a rollback backup only when a change is needed, preserves the existing `[probe_eddy_current btt_eddy]` section byte-for-byte, and adds only the missing `[temperature_sensor btt_eddy_mcu]` and `[temperature_probe btt_eddy]` sections. Review the config, then issue `FIRMWARE_RESTART` from Fluidd. Running the command again is a no-op.
 
 After reviewing the changes, issue `FIRMWARE_RESTART`, validate homing, then measure the CFS napkin strip and install its fixed wipe path:
 
@@ -129,7 +163,8 @@ The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and recheck
 | `persist` | Save only pending Eddy calibration values into `btteddy_mcu.cfg` |
 | `activate` | Enable native Eddy Z and the validated homing/CFS safety routing |
 | `configure-wipe` | Generate the fixed napkin wipe from measured coordinates |
-| `status` | Show firmware, calibration, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
+| `status` | Show firmware, calibration, Eddy probe/MCU temperature-object state, native-Z, corrected off-bed safety guards, exact production-safety contract (`PASS`/`DRIFT`), and wipe state |
+| `upgrade-temperatures` | Back up and add missing Eddy probe/MCU temperature objects to an existing install without rewriting probe calibration; safe to run repeatedly |
 | `verify-production` | Read-only comparison against the final production snapshot; reports `EXACT`, `EXPECTED CUSTOM`, or `DRIFT` and exits nonzero on drift |
 | `release-readiness` | Read-only aggregate PASS/WARN/INFO/FAIL release audit across firmware, calibration, homing safety, native Z, wipe, compatibility sources, optional add-ons, update-snapshot readiness, and repository integrity |
 | `pre-update-snapshot` | Verify the working installation, then preserve the full printer config and update-sensitive Klipper/service files before a firmware update |
@@ -148,14 +183,14 @@ The audit reports `UNCHANGED`, `CHANGED`, `MISSING`, and `NEW` files and recheck
 See [`docs/VALIDATED-STATE.md`](docs/VALIDATED-STATE.md) for the exact behavior and regression state this helper was derived from.
 
 Before merging/tagging a release, use [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md) for the live-printer, CI, recovery, documentation, and physical-motion release gates.
-Draft v1.0.0 release text is maintained in [`docs/RELEASE-NOTES-v1.0.0.md`](docs/RELEASE-NOTES-v1.0.0.md).
+Current release notes are maintained in [`docs/RELEASE-NOTES-v1.0.2.md`](docs/RELEASE-NOTES-v1.0.2.md). Historical notes remain in [`docs/RELEASE-NOTES-v1.0.1.md`](docs/RELEASE-NOTES-v1.0.1.md) and [`docs/RELEASE-NOTES-v1.0.0.md`](docs/RELEASE-NOTES-v1.0.0.md).
 
 A Git-free install archive can be built reproducibly with:
 
 ```sh
 python3 scripts/build_release.py \
-  --version v1.0.0 \
-  --output dist/K1-Klipper-Eddy-v1.0.0.zip
+  --version v1.0.2 \
+  --output dist/K1-Klipper-Eddy-v1.0.2.zip
 ```
 
 The ZIP contains the installer, required Klipper compatibility files, configuration templates, license, and user documentation. It intentionally excludes Git metadata, CI files, tests, caches, and Python bytecode. A `RELEASE-MANIFEST.json` inside the archive records the target firmware, production reference, entrypoint, version, and source commit when available.
