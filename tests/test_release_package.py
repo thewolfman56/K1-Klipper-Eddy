@@ -48,6 +48,7 @@ class ReleasePackageTest(unittest.TestCase):
                     prefix + "docs/RELEASE-CHECKLIST.md",
                     prefix + "docs/RELEASE-NOTES-v1.0.0.md",
                     prefix + "docs/RELEASE-NOTES-v1.0.1.md",
+                    prefix + "docs/RELEASE-NOTES-v1.0.2.md",
                     prefix + "RELEASE-MANIFEST.json",
                 }
                 self.assertTrue(required.issubset(set(names)))
